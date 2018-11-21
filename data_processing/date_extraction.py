@@ -8,6 +8,11 @@ days = set(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 
 date_suffixes = set(['th', 'st', 'nd', 's', 'am', 'pm', 'rd'])
 day_zone = set(['morning', 'evening', 'afternoon', 'night', 'noon', 'midday', 'midnight'])
 seasons = set(['spring', 'summer', 'fall', 'winter'])
+quantities = {'one':1, 'two':2, 'three':3, 'four':4, 'five':5, 'six':6, 'seven':7, 'eight':8, 'nine':9, 'ten':10,
+              'billion':1000000000, 'tenth':10, 'million':1000000, 'thousand':1000, 'hundred':100, 'viii':8,
+              'eleven':11, 'twelve':12, 'thirteen':13, 'iv':4, 'august':8, 'dozen':12, 'twenty':20, 'twice':2,
+              'trillion':1000000000000, 'fourty':40, 'forty':40, 'thirty':30, 'fifty':50, 'thousands':1000,
+              'hundreds':100, 'millions':1000000, 'iv':4}
 
 def isNumber(s):
     regex = re.compile('([^0-9\s]*)[0-9]+[\.,0-9]*([^0-9\s]*)')

@@ -2,8 +2,6 @@
 from amr_utils import *
 import logger
 from re_utils import *
-from collections import defaultdict
-from entities import identify_entities
 from constants import *
 from date_extraction import *
 from utils import *
@@ -53,8 +51,6 @@ def removeDateRedundant(date_spans):
     max_span = max([end-start for (start, end) in date_spans])
     remained_spans = [(start, end) for (start, end) in date_spans if end-start == max_span]
     return remained_spans
-
-
 
 def getDateAttr(frag):
     root_index = frag.root
@@ -117,37 +113,7 @@ def initializeAlignment(amr):
     assert node_alignment.count() == 0 and edge_alignment.count() == 0
     return node_alignment, edge_alignment
 
-# def tryAlign(node_to_span, edge_to_span, amr)
-def extractNodeMapping(alignments, amr_graph, concept_align_map, relation_align_map):
-    #def mergeSpans(index_to_spans):
-    #    new_index_to_spans = {}
-    #    for index in index_to_spans:
-    #        span_list = index_to_spans[index]
-    #        span_list = sorted(span_list, key=lambda x:x[1])
-    #        new_span_list = []
-    #        curr_start = None
-    #        curr_end = None
-
-    #        for (idx, (start, end, _)) in enumerate(span_list):
-    #            if curr_end is not None:
-    #                #assert start >= curr_end, span_list
-    #                if start < curr_end:
-    #                    continue
-    #                if start > curr_end: #There is a gap in between
-    #                    new_span_list.append((curr_start, curr_end, None))
-    #                    curr_start = start
-    #                    curr_end = end
-    #                else: #They equal, so update the end
-    #                    curr_end = end
-
-    #            else:
-    #                curr_start = start
-    #                curr_end = end
-
-    #            if idx + 1 == len(span_list): #Have reached the last position
-    #                new_span_list.append((curr_start, curr_end, None))
-    #        new_index_to_spans[index] = new_span_list
-    #    return new_index_to_spans
+def extractNodeMapping(alignments, amr_graph):
     aligned_set = set()
 
     node_to_toks = defaultdict(list)
@@ -163,16 +129,14 @@ def extractNodeMapping(alignments, amr_graph, concept_align_map, relation_align_
         (index_type, index) = amr_graph.get_concept_relation(curr_frag)
         if index_type == 'c':
             node_to_toks[index].append(tok_idx)
-            curr_node = amr_graph.nodes[index]
-            concept_align_map[tok_idx].append(curr_node.node_str())
+            # curr_node = amr_graph.nodes[index]
+            # concept_align_map[tok_idx].append(curr_node.node_str())
 
         else:
             edge_to_toks[index].append(tok_idx)
-            relation_align_map[tok_idx].append(amr_graph.edges[index].label)
-    # new_node_to_span = mergeSpans(node_to_span)
-    # new_edge_to_span = mergeSpans(edge_to_span)
+            # relation_align_map[tok_idx].append(amr_graph.edges[index].label)
 
-    return (node_to_toks, edge_to_toks, aligned_set)
+    return (node_to_toks, aligned_set)
 
 def searchEntityTokens(entity_mention_toks, tok_seq, unaligned):
     def fuzzy_equal(s1, s2, max_len=5):
@@ -205,8 +169,8 @@ def searchEntityTokens(entity_mention_toks, tok_seq, unaligned):
             return (start, start+1)
     return None
 
-def alignEntities(tok_seq, amr, align_seq, nodeid_to_frag, entity_toks, aligned_toks, all_alignments,
-                  temp_unaligned, node_alignment):
+def alignEntities(tok_seq, amr, align_seq, entity_toks, aligned_toks, all_alignments,
+                  unaligned_set, node_alignment):
 
     def sent_opt_toks():
         opt_toks = []
@@ -236,7 +200,7 @@ def alignEntities(tok_seq, amr, align_seq, nodeid_to_frag, entity_toks, aligned_
             if len(opt_toks) == 0:
                 logger.writeln("No alignment for the entity found")
 
-            (aligned_indexes, entity_spans) = all_aligned_spans(frag, opt_toks, role_toks, temp_unaligned)
+            (aligned_indexes, entity_spans) = all_aligned_spans(frag, opt_toks, role_toks, unaligned_set)
             root_node = amr.nodes[frag.root]
 
             entity_mention_toks = root_node.namedEntityMention()
@@ -244,12 +208,11 @@ def alignEntities(tok_seq, amr, align_seq, nodeid_to_frag, entity_toks, aligned_
             if entity_spans:
                 entity_spans = removeAlignedSpans(entity_spans, aligned_toks)
             else:
-                matched_span = searchEntityTokens(entity_mention_toks, tok_seq, temp_unaligned)
+                matched_span = searchEntityTokens(entity_mention_toks, tok_seq, unaligned_set)
                 if matched_span:
                     entity_spans = [matched_span]
 
             if entity_spans:
-                nodeid_to_frag[root_index] = frag
                 entity_spans = removeRedundant(tok_seq, entity_spans, entity_mention_toks)
 
                 start, end = entity_spans[0]  # Currently we only align to the first mention.
@@ -258,6 +221,7 @@ def alignEntities(tok_seq, amr, align_seq, nodeid_to_frag, entity_toks, aligned_
                 logger.writeln("%d-%d: %s" % (start, end, ' '.join(tok_seq[start:end])))
                 ner_repr = "%s--%s" % (wiki_label, entity_tok_repr)
                 all_alignments[frag.root].append((start, end, ner_repr, "NER"))
+                # print node_alignment, frag.nodes
                 node_alignment |= frag.nodes
             else:
                 entity_not_align = True
@@ -274,13 +238,13 @@ def alignEntities(tok_seq, amr, align_seq, nodeid_to_frag, entity_toks, aligned_
             covered_set = set(covered_toks)
             root_index = frag.root
 
-            all_spans = getContinuousSpans(covered_toks, temp_unaligned, covered_set)
+            all_spans = getContinuousSpans(covered_toks, unaligned_set, covered_set)
             all_spans = removeAlignedSpans(all_spans, aligned_toks)
 
             if all_spans:
                 temp_spans = []
                 for start, end in all_spans:
-                    while start > 0 and (start-1) in temp_unaligned:
+                    while start > 0 and (start-1) in unaligned_set:
                         if tok_seq[start-1] == "th" or (tok_seq[start-1]
                                                         in str(frag) and tok_seq[start-1][0] in '0123456789'):
                             start -= 1
@@ -300,7 +264,6 @@ def alignEntities(tok_seq, amr, align_seq, nodeid_to_frag, entity_toks, aligned_
                     curr_set = set(xrange(start, end))
                     if len(curr_set & aligned_toks) != 0:
                         continue
-                    nodeid_to_frag[root_index] = frag
                     all_alignments[frag.root].append((start, end, "NONE", "DATE"))
                     aligned_toks |= set(xrange(start, end))
                     entity_toks |= set(xrange(start, end))
@@ -308,7 +271,7 @@ def alignEntities(tok_seq, amr, align_seq, nodeid_to_frag, entity_toks, aligned_
                     break
             else:
                 date_repr = str(frag)
-                for index in temp_unaligned:
+                for index in unaligned_set:
                     curr_tok = tok_seq[index]
                     found = False
                     for un_tok in non_covered:
@@ -320,7 +283,6 @@ def alignEntities(tok_seq, amr, align_seq, nodeid_to_frag, entity_toks, aligned_
                     if found:
                         break
                 if found:
-                    nodeid_to_frag[root_index] = frag
                     all_alignments[frag.root].append((index, index+1, "NONE", "DATE"))
                     aligned_toks.add(index)
                     entity_toks.add(index)
@@ -329,7 +291,6 @@ def alignEntities(tok_seq, amr, align_seq, nodeid_to_frag, entity_toks, aligned_
                     logger.writeln("Unaligned entity: %s" % date_repr)
                     entity_not_align = True
     return entity_not_align
-
 
 def outputEdgeAlignment(tok_seq, amr, edge_to_toks, tok2rels):
     for edge_index in edge_to_toks:
@@ -343,12 +304,11 @@ def subgraph_str(subgraph):
     for root_repr in subgraph:
         ret += root_repr
         for (rel, tail_repr) in subgraph[root_repr].items():
-            ret += " %s:%s" % (rel, tail_repr)
+            ret += " :%s %s" % (rel, tail_repr)
     return ret
 
 def alignVerbalization(tok_seq, lemma_seq, amr, verb_list, all_alignments, verb_map, aligned_toks, node_alignment,
                        multi_map):
-
 
     matched_tuples = set()
     for (idx, curr_tok) in enumerate(tok_seq):
@@ -357,7 +317,7 @@ def alignVerbalization(tok_seq, lemma_seq, amr, verb_list, all_alignments, verb_
         if not curr_tok in verb_list:
             curr_tok = lemma_seq[idx]
         if curr_tok in verb_list:
-            for subgraph in VERB_LIST[curr_tok]:
+            for subgraph in verb_list[curr_tok]:
                 matched_frags = amr.matchSubgraph(subgraph)
                 if matched_frags:
                     subgraph_repr = subgraph_str(subgraph)
@@ -383,7 +343,7 @@ def alignVerbalization(tok_seq, lemma_seq, amr, verb_list, all_alignments, verb_
                             multi_map[subgraph_repr] += 1
                             break
 
-def alignOtherConcepts(tok_seq, lem_seq, amr, aligned_toks, aligned_nodes, node_to_toks, edge_to_toks, all_alignments,
+def alignOtherConcepts(tok_seq, lem_seq, amr, aligned_toks, aligned_nodes, node_to_toks, all_alignments,
                        multi_map=None, quantity_map=None, entity_map=None):
     def hasdigit(s):
         return any(c.isdigit() for c in s)
@@ -462,7 +422,6 @@ def alignOtherConcepts(tok_seq, lem_seq, amr, aligned_toks, aligned_nodes, node_
     def mergeNodes(aligned_toks, span_to_nodes):
         for (start, end) in span_to_nodes:
             indices = span_to_nodes[(start, end)]
-            # indices = [node_idx for node_idx in indices if node_idx not in aligned_nodes]
             curr_words = "@".join(tok_seq[start:end])
             curr_set = set(range(start, end))
             if len(aligned_toks & curr_set) != 0:
@@ -597,3 +556,306 @@ def alignOtherConcepts(tok_seq, lem_seq, amr, aligned_toks, aligned_nodes, node_
     mergeNodes(aligned_toks, span_to_nodes)
     retrieveUnaligned()
     return
+
+
+def align_semeval_sentence(tok_seq, lemma_seq, alignment_seq, amr, verb_list, multi_map):
+    node_alignment, _ = initializeAlignment(amr)
+    entity_toks = set()
+    aligned_toks = set()
+    all_alignments = defaultdict(list)
+    node_to_toks, temp_aligned = extractNodeMapping(alignment_seq, amr)
+    unaligned_set = set(xrange(len(tok_seq))) - temp_aligned
+    alignEntities(tok_seq, amr, alignment_seq, entity_toks,
+                  aligned_toks, all_alignments, unaligned_set, node_alignment)
+
+    #Verbalization list
+    verb_map = defaultdict(set)
+    alignVerbalization(tok_seq, lemma_seq, amr, verb_list, all_alignments, verb_map,
+                       aligned_toks, node_alignment, multi_map)
+
+    aligned_nodes = set([node_idx for (node_idx, aligned) in enumerate(node_alignment) if aligned])
+
+    alignOtherConcepts(tok_seq, lemma_seq, amr, aligned_toks, aligned_nodes, node_to_toks,
+                       all_alignments, multi_map)
+
+    ##Based on the alignment from node index to spans in the string
+    unaligned_set = set(xrange(len(tok_seq))) - aligned_toks
+    unaligned_idxs = sorted(list(unaligned_set))
+    logger.writeln("Unaligned tokens: %s" % (" ".join([tok_seq[i] for i in unaligned_idxs])))
+
+    unaligned_nodes = amr.unaligned_nodes(aligned_nodes)
+    logger.writeln("Unaligned vertices: %s" % " ".join([node.node_str() for node in unaligned_nodes]))
+
+    return all_alignments
+
+def build_alignment_maps(amr, all_alignments):
+    start2end, category_map, node_map, wiki_map = {}, {}, {}, {}
+    for node_idx, span_list in all_alignments.items():
+        for span in span_list:
+            if span[1] - span[0] > 6:
+                continue
+            start2end[span[0]] = span[1]
+            wiki_map[span[0]] = span[2]
+            category_map[span[0]] = span[3]
+            node_map[span[0]] = amr.nodes[node_idx].node_str()
+    return start2end, category_map, node_map, wiki_map
+
+def align_jamr_sentence(tok_seq, alignment_seq, amr, phrases):
+    print " ".join(tok_seq)
+    # visited = set()
+    length = len(tok_seq)
+    visited_node_idxs = set()
+    node_to_spans = defaultdict(list)
+    all_alignments = defaultdict(list)
+    idx_to_nodes = defaultdict(set)
+    span_to_graph = {}
+    global_aligned = set()
+    aligned_set = set()
+    aligned_node_idxs = set()
+    for curr_align in alignment_seq:
+
+        span_str = curr_align.split("|")[0]
+        start = int(span_str.split("-")[0])
+        end = int(span_str.split("-")[1])
+        curr_set = set(xrange(start, end))
+        if len(global_aligned & curr_set) != 0:
+            continue
+        global_aligned |= curr_set
+        subgraph_repr = curr_align.split("|")[1]
+        subgraph, node_idx_set = amr.initialize_subgraph(subgraph_repr)
+
+        span_to_graph[(start, end)] = (subgraph, node_idx_set)
+
+        for node_idx in node_idx_set:
+            node_to_spans[node_idx].append((start, end))
+            if len(node_to_spans[node_idx]) > 1:
+                print "one to multiple spans:", alignment_seq, node_to_spans[node_idx]
+
+        for idx in xrange(start, end):
+            idx_to_nodes[idx] |= node_idx_set
+        assert len(node_idx_set & visited_node_idxs) == 0
+        visited_node_idxs |= node_idx_set
+
+    unaligned_set = set(xrange(length)) - global_aligned
+    alignJAMREntities(tok_seq, amr, aligned_set, all_alignments, unaligned_set, node_to_spans, aligned_node_idxs)
+    unaligned_set -= aligned_set
+
+    idx_to_collapsed = alignJAMROtherConcepts(tok_seq, amr, aligned_set, aligned_node_idxs, all_alignments,
+                                              unaligned_set, node_to_spans, span_to_graph, phrases)
+    return all_alignments, idx_to_collapsed
+
+        # print "%d-%d, %s, %s" % (start, end, " ".join(tok_seq[start:end]), str(subgraph))
+
+def alignJAMREntities(tok_seq, amr, aligned_set, all_alignments, unaligned_set, node_to_spans, aligned_node_idxs):
+
+    for (frag, wiki_label, category) in amr.extract_entities():
+        aligned_tok_list = []
+        aligned_spans = []
+        for node_idx in frag.node_list():
+            if node_idx in node_to_spans:
+                for start, end in node_to_spans[node_idx]:
+                    aligned_spans.append((start, end))
+                    for tok_idx in xrange(start, end):
+                        aligned_tok_list.append(tok_idx)
+
+        aligned_tok_list = sorted(aligned_tok_list)
+        aligned_spans = getContinuousSpans(aligned_tok_list, unaligned_set, set(aligned_tok_list))
+        aligned_spans = sorted(aligned_spans, key=lambda x: (x[0]-x[1], x))
+
+        print str(frag)
+
+        if category == "NER":
+            root_node = amr.nodes[frag.root]
+            entity_mention_toks = root_node.namedEntityMention()
+            entity_tok_repr = "_".join(entity_mention_toks)
+            if aligned_spans:
+                start, end = aligned_spans[0]  # Currently we only align to the first mention.
+                aligned_set |= set(xrange(start, end))
+                print "NER: %d-%d, %s" % (start, end, ' '.join(tok_seq[start:end]))
+                ner_repr = "%s--%s" % (wiki_label, entity_tok_repr)
+                all_alignments[frag.root].append((start, end, ner_repr, "NER"))
+                aligned_node_idxs |= set(frag.node_list())
+                # node_alignment |= frag.nodes
+
+        elif category == "DATE":
+            all_date_attrs, index_to_attr = getDateAttr(frag)
+            unmatched_attrs = [amr.nodes[index].node_str() for index in all_date_attrs if index not in node_to_spans]
+            if aligned_spans:
+                start, end = aligned_spans[0]
+                # print tok_seq[start-1], unmatched_attrs
+                while start > 0 and (start-1) in unaligned_set:
+                    if tok_seq[start-1] == "th" or (tok_seq[start-1]
+                                                    in str(frag) and tok_seq[start-1][0] in '0123456789'):
+                        start -= 1
+                    elif tok_seq[start-1] in unmatched_attrs:
+                        start -= 1
+                    else:
+                        break
+
+                    while end < len(tok_seq):
+                        if tok_seq[end] in date_suffixes and end in unaligned_set:  # Some date prefixes
+                            end += 1
+                        else:
+                            break
+
+                print "DATE: %d-%d, %s" % (start, end, ' '.join(tok_seq[start:end]))
+                if unmatched_attrs:
+                    print "unmatched attributes: %s" % (" ".join(unmatched_attrs))
+                all_alignments[frag.root].append((start, end, "NONE", "DATE"))
+                aligned_node_idxs |= set(frag.node_list())
+                aligned_set |= set(xrange(start, end))
+        else:
+            assert "Should be either NER or DATE entities"
+
+
+def alignJAMROtherConcepts(tok_seq, amr, aligned_set, aligned_node_idxs, all_alignments, unaligned_set, node_to_spans,
+                           span_to_graph, phrases, max_phrase_len=4, max_num_len=6):
+
+    def value(toks): #Compute the value of the number representation
+        number = 1
+
+        for v in toks:
+            if isNumber(v):
+                if '.' in v:
+                    if len(toks) == 1:
+                        return v
+                    number *= float(v)
+                else:
+                    v = v.replace(",", "")
+                    number *= int(v)
+            else:
+                v = v.lower()
+                if v in quantities:
+                    # assert v in quantities, v
+                    number *= quantities[v]
+                    number = int(number)
+        return str(number)
+
+    def valid_phrase(start, end, span_set):
+        for idx in span_set:
+            if (idx >= start and idx < end) or idx in unaligned_set:
+                continue
+            return False
+        return True
+
+    def alignPhrases(node_idx):
+        if node_idx not in node_to_spans:
+            return None
+        aligned_spans = node_to_spans[node_idx]
+        assert len(aligned_spans) == 1, node_to_spans
+        start, end = aligned_spans[0]
+
+        for i in xrange(start - max_phrase_len, start+1):
+            if i < 0:
+                continue
+            for j in xrange(end, end + max_phrase_len):
+                if j > len(tok_seq):
+                    break
+                if " ".join(tok_seq[i:j]) in phrases:
+                    span_set = set(xrange(i, j))
+                    if valid_phrase(start, end, span_set):
+                        return (i, j)
+        return None
+
+    def identifyNumber(seq):
+        for tok in seq:
+            if not (isNumber(tok) or tok in quantities):
+                return False
+        return True
+
+    def alignNumber(node_idx):
+        node_repr = amr.nodes[node_idx].node_str()
+        if not isNumber(node_repr):
+            return None
+
+        matched_set = set()
+        if node_idx in node_to_spans:
+            for start, end in node_to_spans[node_idx]:
+                matched_set |= set(xrange(start, end))
+
+        # Greedily match numbers
+        for tok_idx in xrange(len(tok_seq)):
+            if tok_idx in aligned_set:
+                continue
+            for end_idx in xrange(tok_idx+max_num_len, tok_idx, -1):
+                if end_idx > len(tok_seq):
+                    continue
+                if identifyNumber(tok_seq[tok_idx:end_idx]):
+                    covered_set = set(xrange(tok_idx, end_idx))
+                    if len(covered_set & aligned_set) == 0 and value(tok_seq[tok_idx:end_idx]) == node_repr:
+                        return (tok_idx, end_idx)
+
+        return None
+
+    def alignMultiples(aligned_set, aligned_node_idxs):
+        idx_to_collapsed = {}
+        for (start, end) in span_to_graph:
+            curr_set = set(xrange(start, end))
+            if len(curr_set & aligned_set) != 0:
+                continue
+            aligned_subgraph, node_set = span_to_graph[(start, end)]
+            if len(node_set & aligned_node_idxs) != 0:
+                continue
+            curr_repr = str(aligned_subgraph)
+            if len(node_set) > 1:
+                root_idx = amr.get_var_nodeidx(aligned_subgraph.roots[0])
+            else:
+                root_idx = list(node_set)[0]
+            if len(node_set) > 1:
+                all_alignments[root_idx].append((start, end, curr_repr, "MULT"))
+                idx_to_collapsed[root_idx] = node_set
+                print "MULTIPLE: %d-%d, %s, %s" % (start, end, ' '.join(tok_seq[start:end]), curr_repr)
+                aligned_set |= curr_set
+                aligned_node_idxs |= node_set
+            elif end - start > 1:
+                all_alignments[root_idx].append((start, end, curr_repr, "PHRASE"))
+                print "PHRASE: %d-%d, %s, %s" % (start, end, ' '.join(tok_seq[start:end]), curr_repr)
+                aligned_set |= curr_set
+                aligned_node_idxs |= node_set
+        return idx_to_collapsed
+
+    n_nodes = len(amr.nodes)
+    idx_to_collapsed = alignMultiples(aligned_set, aligned_node_idxs)
+    # print "node to spans:", node_to_spans
+    for node_idx in xrange(n_nodes):
+        if node_idx in aligned_node_idxs:
+            continue
+        curr_repr = amr.nodes[node_idx].node_str()
+        aligned_span = alignNumber(node_idx)
+        if aligned_span:
+            start, end = aligned_span
+            curr_set = set(xrange(start, end))
+            if len(aligned_set & curr_set) != 0:
+                continue
+            print "NUMBER: %d-%d, %s, %s" % (start, end, ' '.join(tok_seq[start:end]), curr_repr)
+            all_alignments[node_idx].append((start, end, curr_repr, "NUMBER"))
+            aligned_set |= curr_set
+            aligned_node_idxs.add(node_idx)
+            continue
+        aligned_span = alignPhrases(node_idx)
+        if aligned_span:
+            start, end = aligned_span
+            curr_set = set(xrange(start, end))
+            if len(aligned_set & curr_set) != 0:
+                continue
+            all_alignments[node_idx].append((start, end, curr_repr, "PHRASE"))
+            print "PHRASE: %d-%d, %s, %s" % (start, end, ' '.join(tok_seq[start:end]), curr_repr)
+            aligned_set |= curr_set
+            aligned_node_idxs.add(node_idx)
+            continue
+
+        # Otherwise, alignment one-to-one
+        if node_idx in node_to_spans:
+
+            aligned_spans = node_to_spans[node_idx]
+
+            assert len(aligned_spans) == 1
+            start, end = aligned_spans[0]
+            curr_set = set(xrange(start, end))
+            if len(aligned_set & curr_set) != 0:
+                continue
+            all_alignments[node_idx].append((start, end, curr_repr, "TOKEN"))
+            aligned_set |= curr_set
+            aligned_node_idxs.add(node_idx)
+
+    return idx_to_collapsed

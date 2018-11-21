@@ -3,18 +3,77 @@ import re, os
 import sys
 from collections import defaultdict
 symbols = set("'\".-!#&*|\\/")
-re_symbols = re.compile("['\".\'`\-!#&*|\\/@=\[\]]")
+re_symbols = re.compile("['\".\'`\-!#&*|\\/@=)(\[\]]")
 special_token_map = {"-LRB-": "(", "-RRB-": ")", "-LSB-": "[", "-RSB-": "]"}
 def allSymbols(s):
     return re.sub(re_symbols, "", s) == ""
 
+def removeSymbols(s):
+    return re.sub(re_symbols, "", s)
+
 def equals(s1, s2):
-    s2_sub = s2.replace("-RRB-", ")").replace("-LRB-", "(")
-    s2_sub = re.sub(re_symbols, "", s2_sub)
-    s1 = s1.replace("\xc2\xa3", "#")
+    # s2_sub = s2.replace("-RRB-", ")").replace("-LRB-", "(").replace("\xc2", "GBP")
+    # s2_sub = re.sub(re_symbols, "", s2_sub)
+    s2_sub = re.sub(re_symbols, "", s2)
+    # s1 = s1.replace("\xc2\xa3", "#").replace("\xc2", "GBP")
+    s1 = s1.replace("\xc2\xa3", "GBP")
     s1_sub = re.sub(re_symbols, "", s1)
 
     return s1_sub.lower() == s2_sub.lower()
+
+def process_dep_tokens(s):
+    for k in special_token_map:
+        s = s.replace(k, s)
+    return s
+
+def startToEnd(all_alignment):
+    start_to_end = {}
+    for (start, end) in all_alignment:
+        start_to_end[start] = end
+    return start_to_end
+
+def realign_sentence(orig_seq, targ_seq):
+    """Realign original sequence to the target sequence.
+    Enumerate the situations.
+    """
+    targ_to_orig = {}
+
+    orig_idx, targ_idx = 0, 0
+    while targ_idx < len(targ_seq) and orig_idx < len(orig_seq):
+        orig_tok, targ_tok = orig_seq[orig_idx], targ_seq[targ_idx]
+        # :w
+        # print orig_tok, targ_tok
+        if targ_tok == orig_tok or (allSymbols(orig_tok) and allSymbols(targ_tok)):
+            targ_to_orig[targ_idx] = orig_idx
+            targ_idx += 1
+            orig_idx += 1
+        elif allSymbols(orig_tok):
+            orig_idx += 1
+        elif allSymbols(targ_tok):
+            targ_to_orig[targ_idx] = orig_idx
+            targ_idx += 1
+        else: # see how to
+            for orig_end_idx in xrange(orig_idx+1, orig_idx+5):
+                orig_repr = "".join(orig_seq[orig_idx:orig_end_idx])
+                found = False
+                for targ_end_idx in xrange(targ_idx+1, targ_idx+20):
+                    targ_repr = "".join(targ_seq[targ_idx:targ_end_idx])
+                    if equals(orig_repr, targ_repr):
+                        for idx in xrange(targ_idx,targ_end_idx):
+                            targ_to_orig[idx] = orig_idx
+                        orig_idx = orig_end_idx
+                        targ_idx = targ_end_idx
+                        found = True
+                        break
+                if found:
+                    break
+    # if orig_idx < len(orig_seq):
+    #     return allSymbols("".join(orig_seq[orig_idx:]))
+    if targ_idx < len(targ_seq):
+        for idx in xrange(targ_idx, len(targ_seq)):
+            targ_to_orig[idx] = len(orig_seq) - 1
+        #return allSymbols("".join(targ_seq[targ_idx:]))
+    return targ_to_orig
 
 #Search s in seq from index
 def searchSeq(s, seq, index, aligned_set=None):
@@ -87,6 +146,29 @@ def loadDepTokens(dep_file):
                 #     word = special_token_map[word]
                 tok_seq.append(word)
         dep_f.close()
+    return ret
+
+def loadJAMRConceptID(cid_file):
+    ret = []
+    with open(cid_file, "r") as cid_f:
+        sent_idx = 0
+        span_map = {}
+        for line in cid_f:
+            splits = line.strip().split(":  ")
+            if splits[0] == "Spans:":
+                if len(span_map) > 0: #Currently assume all sentences have alignment
+                    ret.append(span_map)
+                sent_idx += 1
+                span_map = {}
+            else:
+                span = splits[0][5:]
+                start, end = int(span.split("-")[0]), int(span.split("-")[1])
+                span_str = splits[1].split(" => ")[0].strip()
+                subgraph_str = splits[1].split(" => ")[1].strip()
+                span_map[(start, end)] = (span_str, subgraph_str)
+        if len(span_map) > 0:
+            ret.append(span_map)
+        cid_f.close()
     return ret
 
 #Based on some heuristic tokenize rules, map the original toks to the tokenized result
@@ -171,6 +253,8 @@ def saveSetorList(entities, path):
         for item in entities:
             print >>wf, item
         wf.close()
+
+# def loadConceptID(path):
 
 def loadMLEFile(path):
     mle_map = {}

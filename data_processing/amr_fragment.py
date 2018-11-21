@@ -222,7 +222,7 @@ class AMRFragment(object):
         return s
 
     def var_from_graph(amr_graph, binary_reps):
-        bits = binary_rep.split('.')
+        bits = binary_reps.split('.')
         assert bits[0] == '0', 'All binary representation should start from root 0'
 
 def check_adjacent(f1, f2):

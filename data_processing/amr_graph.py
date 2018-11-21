@@ -145,8 +145,6 @@ class AMRNode(object):
             try:
                 assert 'wiki' in v_label_set
             except:
-                #print 'ill-formed entity found'
-                #print str(self.graph)
                 return False
             return True
         return False
@@ -206,6 +204,39 @@ class AMRNode(object):
             result = '"%s"' % result
         return result
 
+# a subgraph of the AMR which connects to the outside through the root only.
+class Subgraph(object):
+    def __init__(self, amr):
+        self.graph = amr
+        self.roots = []
+        self.rel_map = defaultdict(list)
+
+    def add_root(self, val):
+        self.roots.append(val)
+
+    def add_relation(self, par, rel, chl):
+        self.rel_map[par].append((rel, chl))
+
+    def __str__(self):
+        def repr(var, visited):
+            node_repr = self.graph.get_node_repr(var)
+            if var in visited or var not in self.rel_map:
+                return node_repr
+            visited.add(var)
+
+            for (rel, chl_val) in self.rel_map[var]:
+                assert chl_val not in visited
+                node_repr += " :%s" % rel
+                chl_repr = repr(chl_val, visited)
+                if ":" in chl_repr:
+                    node_repr += " (%s)" % chl_repr
+                else:
+                    node_repr += " %s" % chl_repr
+            return node_repr
+
+        visited = set()
+        return "#".join([repr(var, visited) for var in self.roots])
+
 class AMRGraph(object):
     def initialize(self):
         self.dict = {}
@@ -220,6 +251,7 @@ class AMRGraph(object):
         self.verb_index = 0
         self.var_index = 0
         self.const_index = 0
+        self.var_to_node = {}
 
     def __init__(self, line=None):
         if line is None:
@@ -235,6 +267,7 @@ class AMRGraph(object):
         self.edges = []
         self.edge_dict = {}
         self.root = None
+        self.var_to_node = {}
 
         self.ne_index = 0
         self.ent_index = 0
@@ -262,6 +295,7 @@ class AMRGraph(object):
 
                 curr_node.set_const_edge(curr_edge_index) #The const edge is set immediately after the initialization of a node
                 label_to_node[curr_var] = curr_node_idx
+                self.var_to_node[curr_var] = curr_node
 
         for i in range(len(vars)):
             curr_var = vars[i]
@@ -319,6 +353,26 @@ class AMRGraph(object):
                         curr_node.add_incoming(curr_edge_index)
                         tail_node.add_parent_edge(curr_edge_index)
 
+    def get_var_nodeidx(self, var):
+        assert var in self.var_to_node, "\n%s\n%s\n" % (str(self), var)
+        curr_node = self.var_to_node[var]
+        return self.node_dict[curr_node]
+
+    def get_node_repr(self, var):
+        if var not in self.dict:
+            return var
+        return self.dict[var]
+
+    def get_relation(self, par_var, chl_var):
+        assert par_var in self.var_to_node
+        parent_node = self.var_to_node[par_var]
+        for edge_idx in parent_node.v_edges:
+            curr_edge = self.edges[edge_idx]
+            tail_node = self.nodes[curr_edge.tail]
+            if tail_node.node_label() == chl_var:
+                return self.edges[edge_idx].label
+        return None
+
     def setStats(self, stats):
         self.stats = stats
 
@@ -363,192 +417,6 @@ class AMRGraph(object):
 
         return 0
 
-    def getFragment(self, node_idx, verb_map, pred_freq_thre, var_freq_thre, nodeid_to_frag):
-        curr_node = self.nodes[node_idx]
-        curr_var = curr_node.node_str()
-        curr_frag = None
-        if self.is_named_entity(curr_node):
-            exclude_rels = ['wiki','name']
-            assert node_idx in nodeid_to_frag
-            entity_name = curr_node.node_str()
-            curr_frag = nodeid_to_frag[node_idx]
-            ret_var = 'NE_%s' % entity_name
-
-            return curr_frag, exclude_rels, ret_var, True
-        elif self.is_date_entity(curr_node):
-            ret_var = 'DATE'
-            assert node_idx in nodeid_to_frag
-            curr_frag = nodeid_to_frag[node_idx]
-            return curr_frag, date_relations, ret_var, True
-        elif self.is_number(curr_node):
-            ret_var = 'NUMBER'
-            curr_frag = self.build_entity_fragment(curr_node)
-            return curr_frag, [], ret_var, True
-
-        else:
-            curr_frag = self.build_entity_fragment(curr_node)
-            if self.stats.num_nonpredicate_vals[curr_var] >= var_freq_thre:
-                ret_var = curr_var
-                categorized = False
-            else:
-                ret_var = SURF
-                categorized = True
-            return curr_frag, [], ret_var, categorized
-
-        return None, [], curr_var, False
-
-    def get_symbol(self, node_idx, verb_map, pred_freq_thre, var_freq_thre):
-        curr_node = self.nodes[node_idx]
-        curr_var = curr_node.node_str()
-        if self.is_named_entity(curr_node):
-            exclude_rels = ['wiki','name']
-            entity_name = curr_node.node_str()
-            ret_var = 'NE_%s' % entity_name
-
-            return exclude_rels, ret_var, True
-        elif self.is_date_entity(curr_node):
-            ret_var = 'DATE'
-            return date_relations, ret_var, True
-
-        elif self.is_entity(curr_node) and (node_idx not in verb_map):
-            entity_name = curr_node.node_str()
-            ret_var = 'ENT_%s' % entity_name
-            #ret_var = 'ENT_%s-%d' % (entity_name, self.ent_index)
-            #self.ent_index += 1
-            return [], ret_var, True
-        elif self.is_predicate(curr_node):
-            if self.stats.num_predicates[curr_var] >= pred_freq_thre:
-                if node_idx in verb_map:
-                    ex_rels = self.findMatch(curr_node, verb_map[node_idx])
-                    ret_var = curr_var + '_VERBAL'
-                    return ex_rels, ret_var, True
-                ret_var = curr_var
-                categorized = False
-            else:
-                if node_idx in verb_map:
-                    ex_rels = self.findMatch(curr_node, verb_map[node_idx])
-                    ret_var = 'VERBAL'
-                    return ex_rels, ret_var, True
-                ret_var = VERB
-                #ret_var = VERB + ('%d' % self.verb_index)
-                #self.verb_index += 1
-                categorized = True
-            return [], ret_var, categorized
-        elif self.is_const(curr_node):
-            if curr_var in ['interrogative', 'imperative', 'expressive', '-']:
-                return [], curr_var, False
-            else:
-                ret_var = CONST
-                #ret_var = CONST + ('%d' % self.const_index)
-                #self.const_index += 1
-                return [], ret_var, True
-
-        else:
-            if self.stats.num_nonpredicate_vals[curr_var] >= var_freq_thre:
-                if node_idx in verb_map:
-                    ex_rels = self.findMatch(curr_node, verb_map[node_idx])
-                    ret_var = curr_var + '_VERBAL'
-                    return ex_rels, ret_var, True
-                ret_var = curr_var
-                categorized = False
-            else:
-                if node_idx in verb_map:
-                    ex_rels = self.findMatch(curr_node, verb_map[node_idx])
-                    ret_var = 'SURF_VERBAL'
-                    return ex_rels, ret_var, True
-                ret_var = SURF
-                #ret_var = SURF + ('%d' % self.var_index)
-                #self.var_index += 1
-                categorized = True
-            return [], ret_var, categorized
-
-        return [], curr_var, False
-
-    def get_ancestors(self, n, stop_if_see = None):
-        set_n = {n:('',-1)}
-        queue = [n,]
-        while len(queue) > 0:
-            cur = queue.pop(0)
-            for ei in self.nodes[cur].p_edges:
-                e = self.edges[ei]
-                prn = e.head
-                if prn not in set_n:
-                    set_n[prn] = (e.label, cur)
-                    queue.append(prn)
-                if stop_if_see != None and prn in stop_if_see:
-                    return (set_n, prn)
-        return (set_n, None)
-
-    def get_path_v2(self, n1, n2):
-        if n1 == n2:
-            return [], []
-
-        prn_n1, root = self.get_ancestors(n1, {n2:None,})
-        if root != None:
-            result = []
-            while n2 != n1:
-                result.insert(0,prn_n1[n2][0])
-                n2 = prn_n1[n2][1]
-            return (result, [])
-
-        prn_n2, root = self.get_ancestors(n2, prn_n1)
-        assert root != None
-        if n1 == root:
-            result = []
-            while n1 != n2:
-                result.append(prn_n2[n1][0])
-                n1 = prn_n2[n1][1]
-            return ([], result)
-        else:
-            up = []
-            tmp = root
-            while tmp != n1:
-                up.insert(0,prn_n1[tmp][0])
-                tmp = prn_n1[tmp][1]
-            down = []
-            tmp = root
-            while tmp != n2:
-                down.append(prn_n2[tmp][0])
-                tmp = prn_n2[tmp][1]
-            return (up, down)
-
-
-    def get_path(self, n1, n2):
-        assert False, 'not fully tested, don\'t use'
-        assert n1 < len(self.nodes) and n2 < len(self.nodes)
-
-        print '---------------', n1, n2
-        set_n1 = set([n1,])
-        labels_n1 = []
-        while len(self.nodes[n1].p_edges) > 0:
-            edge = self.edges[self.nodes[n1].p_edges[0]]
-            n1_prime = edge.head
-            if n1_prime in set_n1:
-                break
-            print 'n1 part', (n1, n1_prime, edge.label)
-            labels_n1.append((n1_prime, edge.label))
-            n1 = n1_prime
-
-        set_n2 = set([n2,])
-        labels_n2 = []
-        while n2 not in set_n1 and len(self.nodes[n2].p_edges) > 0:
-            edge = self.edges[self.nodes[n2].p_edges[0]]
-            n2_prime = edge.head
-            if n2_prime in set_n2:
-                break
-            print 'n2 part', (n2, n2_prime, edge.label)
-            labels_n2.append((n2_prime, edge.label))
-            n2 = n2_prime
-
-        result = []
-        for (n1, label) in labels_n1:
-            if n1 != n2:
-                result.append(label)
-        result = result + [x[1] for x in labels_n2]
-        print result
-        return result
-
-
     def get_relation_edges(self):
         relation_edges = {}
         for edge in self.edges:
@@ -578,8 +446,8 @@ class AMRGraph(object):
             try:
                 assert 'wiki' in edge_label_set
             except:
-                print 'ill-formed entity found'
-                print str(self)
+                # print 'ill-formed entity found'
+                # print str(self)
                 return False
             return True
         return False
@@ -619,18 +487,6 @@ class AMRGraph(object):
     def set_poss(self, s):
         self.poss = s
 
-    def print_info(self):
-        #print all nodes info
-        print 'Nodes information:'
-        print 'Number of nodes: %s' % len(self.nodes)
-        for node in self.node_dict.keys():
-            print str(node), ',', self.node_dict[node]
-
-        #print all edges info
-        print 'Edges information'
-        print 'Number of edges: %s' % len(self.edges)
-        for edge in self.edge_dict.keys():
-            print edge.label, ',', self.edge_dict[edge]
 
     def check_self_cycle(self):
         visited_nodes = set()
@@ -737,7 +593,7 @@ class AMRGraph(object):
         return sequence
 
     @classmethod
-    def collapsedAMR(cls, amr, all_alignments):
+    def collapsedAMR(cls, amr, all_alignments, idx_to_nodes=None):
         """
         Categories---
         NER: named entity
@@ -746,7 +602,6 @@ class AMRGraph(object):
         NUMBER: number
         NEGATION: polarity
         PHRASE: ---
-
         """
 
         def category_info(node_idx, category, subgraph=None):
@@ -780,7 +635,6 @@ class AMRGraph(object):
             return category_name, exclude_rels
 
         new_amr = AMRGraph()
-        new_alignments = defaultdict(list)
 
         span_to_type = {}
         stack = [(amr.root, TOP, None)] #Start from the root of the AMR
@@ -789,7 +643,6 @@ class AMRGraph(object):
         collapsed_map = {}
 
         node_oldtonew = {}
-        # nodeid_to_type = {}
 
         while stack:
             curr_node_idx, rel, parent = stack.pop()
@@ -825,7 +678,7 @@ class AMRGraph(object):
                 new_amr.root = new_node_idx
 
             if curr_node_idx in all_alignments:
-                new_alignments[new_node_idx] = all_alignments[curr_node_idx]
+                # new_alignments[new_node_idx] = all_alignments[curr_node_idx]
                 for (start, end, graph_repr, _) in all_alignments[curr_node_idx]:
                     span_to_type[(start, end)] = (new_node_idx, graph_repr, curr_sym)
                     # nodeid_to_type[new_node_idx] = (graph_repr, curr_sym)
@@ -839,9 +692,22 @@ class AMRGraph(object):
                 curr_edge = amr.edges[edge_index]
                 child_index = curr_edge.tail
                 child_repr = amr.nodes[child_index].node_str()
-                if ("MULT" not in curr_sym and curr_edge.label in exclude_rels) or (
+                # If the alignment is to multiple, check if there is a node set.
+                if idx_to_nodes and curr_node_idx in idx_to_nodes:
+                    assert "MULT" in curr_sym, "\n%s" % curr_sym
+                    for tail_node_idx in idx_to_nodes:
+                        if tail_node_idx != curr_node_idx:
+                            collapsed_map[tail_node_idx] = curr_node_idx
+                            tail_node = amr.nodes[tail_node_idx]
+                            for next_edge_index in reversed(tail_node.v_edges):
+                                next_edge = amr.edges[next_edge_index]
+                                next_child_index = next_edge.tail
+                                # TODO: mark this edge as UNKNOWN, since it's incorrect.
+                                # Currently keep it because of connectivity.
+                                stack.append((next_child_index, next_edge.label, new_node_idx))
+
+                elif ("MULT" not in curr_sym and curr_edge.label in exclude_rels) or (
                                 "MULT" in curr_sym and (curr_edge.label, child_repr) in exclude_rels):
-                    # visited.add(child_index)
                     collapsed_map[child_index] = curr_node_idx
                     if curr_sym[:2] != 'NE': #Might have other relations
                         tail_node = amr.nodes[child_index]
@@ -853,83 +719,8 @@ class AMRGraph(object):
                     continue
                 stack.append((child_index, curr_edge.label, new_node_idx))
 
-        return new_amr, new_alignments, span_to_type
+        return new_amr, span_to_type
 
-    def dfsCollapsed(self):
-        visited_nodes = set()
-        sequence = []
-        stack = [(self.root, None, 0, False)]
-        while stack:
-            curr_node_idx, par_rel, depth, is_coref = stack.pop()
-            sequence.append((curr_node_idx, is_coref, par_rel, depth)) #push a tuple recording the depth search info
-            if is_coref:
-                continue
-
-            visited_nodes.add(curr_node_idx)
-            curr_node = self.nodes[curr_node_idx]
-            if self.is_named_entity(curr_node):
-                exclude_rels = ['wiki', 'name']
-            elif self.is_date_entity(curr_node):
-                exclude_rels = date_relations
-            else:
-                exclude_rels = []
-
-            if len(curr_node.v_edges) > 0:
-                for edge_index in reversed(curr_node.v_edges):  #depth first search
-                    curr_edge = self.edges[edge_index]
-                    curr_rel = curr_edge.label
-                    child_index = curr_edge.tail
-                    if not curr_edge.is_coref:
-                        stack.append((child_index, curr_rel, depth+1, False))
-                    else:
-                        stack.append((child_index, curr_rel, depth+1, True))
-        return sequence
-
-    def collapsed_dfs(self, root2fragment):
-        visited_nodes = set()
-        sequence = []
-
-        collapsed_edges = bitarray(len(self.edges))
-        if collapsed_edges.count() != 0:
-            collapsed_edges ^= collapsed_edges
-        assert collapsed_edges.count() == 0
-
-        collapsed_nodes = bitarray(len(self.nodes))
-        if collapsed_nodes.count() != 0:
-            collapsed_nodes ^= collapsed_nodes
-        assert collapsed_nodes.count() == 0
-
-        stack = [(self.root, None, 0, False)]
-        while stack:
-            curr_node_idx, par_rel, depth, is_coref = stack.pop()
-            if collapsed_nodes[curr_node_idx] == 1: #Disallow sharing of inside of named entity, delete for approximation
-                continue
-
-            sequence.append((curr_node_idx, is_coref, par_rel, depth)) #push a tuple recording the depth search info
-            if is_coref:
-                continue
-
-            visited_nodes.add(curr_node_idx)
-            curr_node = self.nodes[curr_node_idx]
-
-            if curr_node_idx in root2fragment:  #Need to be collapsed
-                collapsed_edges |= root2fragment[curr_node_idx].edges #Collapse all the entity edges
-                collapsed_nodes |= root2fragment[curr_node_idx].nodes #These nodes should never be revisited
-                collapsed_nodes[curr_node_idx] = 0
-
-            if len(curr_node.v_edges) > 0:
-                for edge_index in reversed(curr_node.v_edges):  #depth first search
-                    if collapsed_edges[edge_index] == 1: #Been collapsed
-                        continue
-
-                    curr_edge = self.edges[edge_index]
-                    curr_rel = curr_edge.label
-                    child_index = curr_edge.tail
-                    if not curr_edge.is_coref:
-                        stack.append((child_index, curr_rel, depth+1, False))
-                    else:
-                        stack.append((child_index, curr_rel, depth+1, True))
-        return sequence
 
     def extract_entities(self):
         entity_frags = []
@@ -1147,13 +938,6 @@ class AMRGraph(object):
         frag.set_edge(c_edge_index)
 
         if curr_node_idx == self.root:
-            #try:
-            #    assert len(curr_node.p_edges) == 0, 'The root node has some parent nodes'
-            #except AssertionError:
-            #    #print str(self)
-            #    #logger.writeln(str(self))
-            #    #sys.exit(-1)
-            #    return None
 
             length_two = len([None for x in lengths if (x == 2)])
             if len(curr_node.v_edges) > length_two:
@@ -1205,6 +989,66 @@ class AMRGraph(object):
 
         frag.set_ext_set(ext_set)
         return frag
+
+    #The concepts are all unary or split at the last stage
+    def initialize_subgraph(self, integer_reps):
+        def initialize_one_concept(path, subgraph, node_map, node_idx_set, first=False):
+            if len(path) == 1:
+                assert path[0] == 0
+            node_idx = self.root
+            curr_node = self.nodes[node_idx]
+            # Go down each level to get the variable name
+            for (depth, chl_no) in enumerate(path):
+                if depth == 0:
+                    node_idx = self.root
+                    curr_node = self.nodes[node_idx]
+                    continue
+                idx = 0
+                for edge_idx in curr_node.v_edges:
+                    curr_edge = self.edges[edge_idx]
+                    if curr_edge.is_coref:
+                        continue
+                    if idx == chl_no:
+                        node_idx = curr_edge.tail
+                        curr_node = self.nodes[node_idx]
+                        break
+                    idx += 1
+            node_var = curr_node.node_label()
+            node_idx_set.add(node_idx)
+            path_repr = ".".join([str(i) for i in path])
+            node_map[path_repr] = curr_node
+
+            if first: # Root node of the subgraph
+                subgraph.add_root(node_var)
+            else:
+                # assert len(path) > min_len, "\n%s\n%s\n" % (str(self), str(path))
+                prefix = ".".join(path_repr.split(".")[:-1])
+                assert prefix in node_map
+                parent_var = node_map[prefix].node_label()
+                # print parent_var, node_var
+                relation = self.get_relation(parent_var, node_var)
+                subgraph.add_relation(parent_var, relation, node_var)
+
+        subgraph = Subgraph(self)
+        node_idx_set = set()
+        node_map = {}
+
+        integer_concepts = sorted(integer_reps.split('+'))
+        integer_concepts = [x.split('.') for x in integer_concepts] #Each concept is a list of integers memorizing a path from the root to the concept
+        # integer_concepts = sorted(integer_concepts, key=lambda x: len(x))
+        integer_concepts = [[(int)(x) for x in y] for y in integer_concepts]
+
+        lengths = [len(x) for x in integer_concepts]
+        max_len = max(lengths)
+        min_len = min(lengths)
+
+        min_elems = [x for x in integer_concepts if len(x) == min_len]
+        assert len(min_elems) == 1, integer_concepts
+
+        for (idx, curr_path) in enumerate(integer_concepts):
+            initialize_one_concept(curr_path, subgraph, node_map, node_idx_set, idx==0)
+
+        return subgraph, node_idx_set
 
     #Newly added, to retrieve the smallest alignment
     def get_concept_relation(self, s_rep):
@@ -1356,127 +1200,9 @@ class AMRGraph(object):
 
         return (named_entity_nums, entity_nums, predicate_nums, variable_nums, const_nums, reentrancy_nums)
 
-    #Do a depth-first traversal of the graph, print the amr format
-    #Collapsing some fragments into single node repr
-    def collapsed_form(self, root2fragment, root2entitynames):
-
-        s = ""
-        node_sequence = self.collapsed_dfs(root2fragment)
-        assert node_sequence[0][2] == None, 'The parent relation of the root should be none, %s' % node_sequence[0][2]
-
-        dep_rec = 0 #record the current depth
-        for curr_node_idx, is_coref, par_rel, depth in node_sequence:
-            curr_node = self.nodes[curr_node_idx]
-
-            curr_c_edge = self.edges[curr_node.c_edge]
-            curr_node_label = str(curr_c_edge)
-
-            if curr_node_idx in root2fragment: #Collapse the fragment at current node
-
-                entity_tag = root2entitynames[curr_node_idx]
-                assert curr_node_label in self.dict
-                #assert not curr_node.is_leaf()  #Can be unknow date-entity
-
-                entity_frag = root2fragment[curr_node_idx]
-                is_leaf_entity = True
-
-                for edge_index in curr_node.v_edges:
-                    if entity_frag.edges[edge_index] != 1:
-                        is_leaf_entity = False
-
-                if not par_rel:
-                    if not is_coref: #First visit of this node, use the fragment name repr
-                        if is_leaf_entity:
-                            s += "(%s)" % entity_tag
-                        else:
-                            s += "(%s" % entity_tag #Single entity
-                    else:
-                        s += "%s_copy" % entity_tag
-                        print "impossible here!"
-                else:
-                    if depth < dep_rec:  #If the current layer is smaller than the current depth, then the previous few variables have finished traverse, print out the corresponding ) as finish
-                        s += "%s" % ((dep_rec- depth) * ')')
-                    dep_rec = depth
-
-                    if not is_coref:
-                        if is_leaf_entity:
-                            s += " :%s (%s)"  % (par_rel, entity_tag)
-                        else:
-                            s += " :%s (%s"  % (par_rel, entity_tag)
-                    else:
-                        s += " :%s %s_copy" % (par_rel, entity_tag)
-
-            else:
-                if not par_rel:   #There is no relation going into this node
-                    if not is_coref and curr_node_label in self.dict.keys():
-                        s += "(%s / %s" % (curr_node_label, self.dict[curr_node_label])
-                    else:
-                        s += "(%s" % curr_node_label
-                else:
-                    if depth < dep_rec:  #If the current layer is smaller than the current depth, then the previous few variables have finished traverse, print out the corresponding ) as finish
-                        s += "%s" % ((dep_rec- depth) * ')')
-                    dep_rec = depth
-
-                    if curr_node.is_leaf():
-                        if not is_coref and curr_node_label in self.dict.keys(): #In this case, current node is variable and is visited for the first time. Leaf variable
-                            s += "\n%s:%s (%s / %s)"  % (depth*"\t", par_rel, curr_node_label, self.dict[curr_node_label])
-                        else:
-                            if curr_node_label not in self.dict.keys() and curr_node.use_quote:
-                                s += '\n%s:%s "%s"' % (depth*"\t", par_rel, curr_node_label)
-                            else:
-                                s += "\n%s:%s %s" % (depth*"\t", par_rel, curr_node_label)
-                    else:
-                        if not is_coref and curr_node_label in self.dict.keys(): #In this case, current node is variable and is visited for the first time. Not leaf variable
-                            s += "\n%s:%s (%s / %s"  % (depth*"\t", par_rel, curr_node_label, self.dict[curr_node_label])
-                        else:
-                            s += "\n%s:%s %s" % (depth*"\t", par_rel, curr_node_label)
-        if dep_rec != 0:
-            s += "%s" % (dep_rec * ')')
-        return s
-
-    def print_variables(self):
-        s = ''
-        for node in self.nodes:
-            var = str(node)
-            s += str(node)
-            s += '/'
-            s += self.dict[var]
-            s += ' '
-        print s
-
-#unaligned_words are formatted as tuples of (position, word)
-def match_word(label, unaligned_words, lemma_map, stop_words):
-    for (pos, word) in unaligned_words:
-        if word.lower() in stop_words:
-            continue
-        lem_w = None
-        if word in lemma_map:
-            lem_w = list(lemma_map[word])[0]
-
-        if len(label) > 4:
-            if word[:3] == label[:3] or (lem_w and lem_w[:3] == label[:3]):
-                return (pos, word)
-        else:
-            if word == label or (lem_w and lem_w == label):
-                return (pos, word)
-    return (None, None)
-
-def concept_label(label):
-    concept_label = label
-    if '/' in concept_label:
-        concept_label = concept_label.split('/')[1].strip()
-    elif concept_label[0] == '"':
-        concept_label = delete_pattern(concept_label, '~e\.[0-9]+(,[0-9]+)*')
-        assert concept_label[-1] == '"', 'weird constant %s' % concept_label
-        concept_label = concept_label[1:-1]
-    return concept_label
-
-def is_root_arc(edge_label):
-    return (edge_label[:3] == 'ARG' and 'of' not in edge_label) or edge_label[:2] == 'op' or edge_label[:3] == 'snt'
 
 if __name__ == '__main__':
     amr_line = '(f / foolish :condition (d / do-02  :ARG0 i) :domain (i / i))'
     #amr_line = '(e / establish-01:ARG1 (m / model:mod (i / innovate-01:ARG1 (i2 / industry))))'
     g = AMRGraph(amr_line)
     print str(g)
-

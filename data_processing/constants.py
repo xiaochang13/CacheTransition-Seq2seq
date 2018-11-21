@@ -34,7 +34,7 @@ num_set = set()
 
 root_concepts = defaultdict(int)
 
-def _load_verb_list(path_to_file):
+def load_verb_list(path_to_file):
     verbdict = {}
     with open(path_to_file,'r') as f:
         for line in f:
@@ -62,7 +62,7 @@ def _load_verb_list(path_to_file):
 
     return verbdict
 
-VERB_LIST = _load_verb_list(PATH_TO_VERB_LIST)
+# VERB_LIST = _load_verb_list(PATH_TO_VERB_LIST)
 #for relation in all_relations:
 #    print relation
 #

@@ -95,7 +95,6 @@ def unalignedOutTails(amr, all_alignments):
         curr_node_idx = stack.pop()
 
         curr_node = amr.nodes[curr_node_idx]
-        curr_var = curr_node.node_str()
 
         if curr_node_idx in visited: #A reentrancy found
             continue
@@ -139,7 +138,7 @@ def visitUnaligned(mapped_set, amr, index):
                 stack.append(head_idx)
     return mapped_set, visited_seq
 
-def buildPiSeq(amr, tok_seq, all_alignments, sorted_idxes):
+def buildPiSeq(amr, all_alignments, sorted_idxes):
 
     index_set, tail_set, edge_map, edge_list = unalignedOutTails(amr, all_alignments)
 
@@ -259,6 +258,7 @@ class AMR_stats(object):
         return s
 
 
+
 def realign(input_file, tokenized_file, alignment_file, alignment_output):
     def ordered_alignment(align_seq):
         align_map = defaultdict(set)
@@ -330,35 +330,39 @@ def dependency_align(dep_file, token_file, output_dep_file=None):
         align_maps.append(align_map)
     return align_maps
 
-
 def linearize_amr(args):
-
-    def tok_features(feats, seq, curr_idx, win=2, prefix=""):
-        length = len(seq)
-        for idx in range(curr_idx-win, curr_idx+win+1):
-            feat_str = "%s%d=" % (prefix, idx-curr_idx)
-            if idx < 0 or idx >= length:
-                feats.append(feat_str+ "-NULL-")
-            else:
-                tok_str = seq[idx]
-                if tok_str[:3] == "NE_":
-                    tok_str = "NE"
-                feats.append(feat_str+ tok_str)
+    """
+    Process training data into input to the oracle extraction input format.
+    :param args:
+    :return:
+    """
+    def reduce_op(s):
+        if len(s) < 3:
+            return s
+        if s[:2] == "op" and s[2] in "0123456789":
+            return "op"
+        return s
 
     os.system("mkdir -p %s" % args.run_dir)
     logger.file = open(os.path.join(args.run_dir, 'logger'), 'w')
-
-    phrase_map = {}
 
     amr_file = os.path.join(args.data_dir, 'amr')
     alignment_file = os.path.join(args.data_dir, 'alignment')
     tok_file = os.path.join(args.data_dir, 'token')
     lem_file = os.path.join(args.data_dir, 'lemma')
     pos_file = os.path.join(args.data_dir, 'pos')
+    phrase_file = os.path.join(args.data_dir, "phrases")
+
+    # Map from a frequent phrase to its most frequent concept.
+    phrase_map = utils.loadPhrases(phrase_file)
+    if args.format == "jamr":
+        align_tok_file = os.path.join(args.data_dir, "cdec_tok")
 
     amr_graphs = load_amr_graphs(amr_file)
     alignments = loadTokens(alignment_file)
-    toks = loadTokens(tok_file)
+    toks = loadTokens(align_tok_file)
+    orig_toks = loadTokens(tok_file)
+
     lems = loadTokens(lem_file)
     poss = loadTokens(pos_file)
 
@@ -375,41 +379,17 @@ def linearize_amr(args):
         amr_statistics.collect_stats(amr_graphs)
         amr_statistics.dump2dir(args.stats_dir)
 
-    # phrases = set([line.strip().split('###')[0].strip() for line in open('phrases')])
-    # phrase_freq = defaultdict(int)
+    output_amr_conll = os.path.join(args.data_dir, "amr_conll")
 
-    conll_wf = open(args.conll_file, 'w')
-    output_tok = os.path.join(args.run_dir, "token")
-    output_lem = os.path.join(args.run_dir, "lemma")
-    output_pos = os.path.join(args.run_dir, "pos")
-
-    output_alignment = os.path.join(args.run_dir, "alignment")
-    old_align_output = os.path.join(args.run_dir, "old_align")
-    concept_alignment = os.path.join(args.run_dir, "concept_alignment")
-    conceptID_file = os.path.join(args.run_dir, "conceptID_examples.txt")
-
-    alignment_counts = {}
-    lemma_align_counts = {}
-    tok_counts = defaultdict(int)
-    lem_counts = defaultdict(int)
-
-    tok_wf = open(output_tok, 'w')
-    lemma_wf = open(output_lem, 'w')
-    pos_wf = open(output_pos, 'w')
-    alignment_wf = open(output_alignment, 'w')
-    old_align_wf = open(old_align_output, 'w')
-    concept_example_wf = open(conceptID_file, 'w')
-
-    root_entity_num = defaultdict(int)
-
-    mle_map = {}
-    mleLemmaMap = {}
+    # tok_wf = open(output_tok, 'w')
+    # lemma_wf = open(output_lem, 'w')
+    # pos_wf = open(output_pos, 'w')
+    conll_wf = open(output_amr_conll, "w")
 
     tok2counts = {}
     tok2counts["NE"] = defaultdict(int)
     tok2counts["NUMBER"] = defaultdict(int)
     tok2counts["DATE"] = defaultdict(int)
-    lemma2counts = {}
 
     random.seed(0)
 
@@ -419,16 +399,12 @@ def linearize_amr(args):
     conceptOutgoFreq = defaultdict(int)
     conceptIncomeFreq = defaultdict(int)
 
-    # phrase_counts = loadCountTable("phrase_dist.txt")
-    ambiguous_toks = ml_utils.loadConceptIDCounts("train_tables/conceptIDcounts.txt")
-    ambiguous_lems = ml_utils.loadConceptIDCounts("train_tables/lemmaIDcounts.txt")
-
     concept_counts = defaultdict(int)
     relcounts = defaultdict(int)
 
     frequent_set = loadFrequentSet(args.freq_dir)
 
-    unaligned_sents = 0
+    # unaligned_sents = 0
 
     tok_to_categories = {}
     tok_to_concept = {}
@@ -440,267 +416,117 @@ def linearize_amr(args):
         mapped_category = getCategories(tok_to_concept[tok_str], frequent_set)
         tok_to_categories[tok_str] = mapped_category
 
-    ngram_counts = defaultdict(int)
+    verbalization_path = os.path.join(args.resource_dir, "verbalization-list-v1.01.txt")
+    VERB_LIST = load_verb_list(verbalization_path)
+
+    skipped_train_sentences = set([int(line.strip() for line in open("./skipped_sentences"))])
+
+    amr_indices = 0
 
     for (sent_idx, tok_seq) in enumerate(toks):
+        # if sent_idx != 7592:
+        #     continue
 
+        idx_to_collapsed = None
+        orig_tok_seq = orig_toks[sent_idx]
+        # realign_sentence("".join(orig_tok_seq), "".join(tok_seq))
+        if not equals("".join(orig_tok_seq), "".join(tok_seq)):
+            print "Skip sentence: %d" % sent_idx
+            continue
+
+        # print "Sentence", sent_idx
+        # print orig_tok_seq
+        # print tok_seq
+
+        tok_to_orig = realign_sentence(orig_tok_seq, tok_seq)
         lemma_seq, pos_seq = lems[sent_idx], poss[sent_idx]
-        alignment_seq, amr = alignments[sent_idx], amr_graphs[sent_idx]
 
-        tok2rels = defaultdict(set)
+        if args.format == "jamr":
+            print "Sentence %d" % sent_idx
+            amr, alignment_seq = amr_graphs[sent_idx], alignments[sent_idx]
+            all_alignments, idx_to_collapsed = alignment_utils.align_jamr_sentence(tok_seq,
+                                                                                   alignment_seq, amr, phrase_map)
 
-        logger.writeln('Sentence #%d' % (sent_idx+1))
-        logger.writeln(' '.join(tok_seq))
+            print ""
 
-        amr.setStats(amr_statistics)
+        else:
+            alignment_seq, amr = alignments[sent_idx], amr_graphs[sent_idx]
 
-        amr.set_sentence(lemma_seq) ##Here we consider the lemmas for amr graph
-        amr.set_poss(pos_seq)
+            logger.writeln('Sentence #%d' % (sent_idx+1))
+            logger.writeln(' '.join(tok_seq))
 
-        # Initialize the alignment
-        node_alignment, _ = alignment_utils.initializeAlignment(amr)
+            amr.setStats(amr_statistics)
 
-        concept_align_map = defaultdict(list)
-        relation_align_map = defaultdict(list)
+            amr.set_sentence(lemma_seq) ##Here we consider the lemmas for amr graph
+            amr.set_poss(pos_seq)
 
-        node_to_toks, edge_to_toks, temp_aligned = alignment_utils.extractNodeMapping(
-            alignment_seq, amr, concept_align_map, relation_align_map)
-        alignment_utils.outputEdgeAlignment(tok_seq, amr, edge_to_toks, tok2rels)
+            all_alignments = alignment_utils.align_semeval_sentence(tok_seq, lemma_seq, alignment_seq, amr,
+                                                                    VERB_LIST, multi_map)
 
-        temp_unaligned = set(xrange(len(pos_seq))) - temp_aligned
-
-        aligned_toks = set()
-
-        all_alignments = defaultdict(list)
-        nodeid_to_frag = {}
-
-        entity_toks = set()
-
-        entity_not_align = alignment_utils.alignEntities(tok_seq, amr, alignment_seq, nodeid_to_frag, entity_toks,
-                                                         aligned_toks, all_alignments, temp_unaligned, node_alignment)
-
-        #Verbalization list
-        verb_map = defaultdict(set)
-        alignment_utils.alignVerbalization(tok_seq, lemma_seq, amr, VERB_LIST, all_alignments, verb_map,
-                                           aligned_toks, node_alignment, multi_map)
-
-        aligned_nodes = set([node_idx for (node_idx, aligned) in enumerate(node_alignment) if aligned])
-
-        alignment_utils.alignOtherConcepts(tok_seq, lemma_seq, amr, aligned_toks, aligned_nodes, node_to_toks,
-                                           edge_to_toks, all_alignments, multi_map)
-        # print "All alignments:", str(all_alignments)
-
-        ##Based on the alignment from node index to spans in the string
-        unaligned_set = set(xrange(len(pos_seq))) - aligned_toks
-        unaligned_idxs = sorted(list(unaligned_set))
-        logger.writeln("Unaligned tokens: %s" % (" ".join([tok_seq[i] for i in unaligned_idxs])))
-
-        unaligned_nodes = amr.unaligned_nodes(aligned_nodes)
-        logger.writeln("Unaligned vertices: %s" % " ".join([node.node_str() for node in unaligned_nodes]))
-
-        # Save alignments to file.
-        start2end, category_map, node_map, wiki_map = {}, {}, {}, {}
-        for node_idx, span_list in all_alignments.items():
-            for span in span_list:
-                if span[1] - span[0] > 6:
-                    continue
-                start2end[span[0]] = span[1]
-                wiki_map[span[0]] = span[2]
-                category_map[span[0]] = span[3]
-                node_map[span[0]] = amr.nodes[node_idx].node_str()
-
-        # Save the old alignment.
-        print >> old_align_wf, "Sentence #%d" % sent_idx
-        for (tok_idx, curr_tok) in enumerate(tok_seq):
-            concept_l = "NONE"
-            if tok_idx in concept_align_map:
-                concept_l = "#".join(concept_align_map[tok_idx])
-            relation_l = "NONE"
-            if tok_idx in relation_align_map:
-                relation_l = "#".join(relation_align_map[tok_idx])
-            attrs = ["%d" % tok_idx]
-            attrs.append(curr_tok)
-            attrs.append(concept_l)
-            attrs.append(relation_l)
-            print >> old_align_wf, " ||| ".join(attrs)
-        print >> old_align_wf, ""
-
-        visited_idxs = set()
-
-        conceptID_seq = []
-
-        if entity_not_align:
-            unaligned_sents += 1
-            logger.writeln(str(amr))
-
-        new_amr, _, span_to_type = AMRGraph.collapsedAMR(amr, all_alignments)
+        assert len(orig_tok_seq) == len(pos_seq)
+        new_amr, span_to_type = AMRGraph.collapsedAMR(amr, all_alignments, idx_to_collapsed)
 
         new_amr.update_stats(conceptToOutGo, conceptToIncome, conceptOutgoFreq,
                              conceptIncomeFreq, concept_counts, relcounts, frequent_set)
 
+        print str(new_amr)
+
+        new_alignment = defaultdict(list)
         nodeid_to_repr = {}
+        aligned_set = set()
         for (start, end) in span_to_type:
+            curr_aligned = set(xrange(start, end))
+            if len(aligned_set & curr_aligned) != 0:
+                print "Overlapping alignment: %d" % sent_idx
+                continue
+            aligned_set |= curr_aligned
             (node_idx, subgraph_repr, category) = span_to_type[(start, end)]
+            new_alignment[node_idx].append((start, end))
             if node_idx not in nodeid_to_repr:
                 tok_repr = "_".join(tok_seq[start:end])
                 nodeid_to_repr[node_idx] = (tok_repr, subgraph_repr, category)
 
-            tok_s = ' '.join(tok_seq[start:end])
-            lemma_s = ' '.join(lemma_seq[start:end])
-            if not tok_s in tok2counts:
-                tok2counts[tok_s] = defaultdict(int)
-
-            tok2counts[tok_s]["%s||%s" % (category, subgraph_repr)] += 1
-            tok_counts[tok_s] += 1
-            if category == "NE" or "NE_" in category:
-
-                tok2counts["NE"]["%s||%s" % (category, "-")] += 1
-                tok_counts["NE"] += 1
-            elif category == "DATE" or category == "NUMBER":
-                tok2counts[category]["%s||%s" % (category, "-")] += 1
-                tok_counts[category] += 1
-            if not ((category == "NE") or ("NE_" in category) or (category == "DATE")):
-                if not lemma_s in lemma2counts:
-                    lemma2counts[lemma_s] = defaultdict(int)
-
-                lemma2counts[lemma_s]["%s||%s" % (category, subgraph_repr)] += 1
-                lem_counts[lemma_s] += 1
-
-        for index in unaligned_idxs:
-            tok_s = tok_seq[index]
-            lemma_s = lemma_seq[index]
-            if not tok_s in tok2counts:
-                tok2counts[tok_s] = defaultdict(int)
-            if not lemma_s in lemma2counts:
-                lemma2counts[lemma_s] = defaultdict(int)
-            tok2counts[tok_s]["%s||%s" % ("NONE", "NONE")] += 1
-            tok_counts[tok_s] += 1
-            lemma2counts[lemma_s]["%s||%s" % ("NONE", "NONE")] += 1
-            lem_counts[lemma_s] += 1
-
-        # print "Span to type:", str(span_to_type)
-        collapsed_toks, collapsed_lem, collapsed_pos, new_alignment, new_start_to_end = collapseTokens(
-            tok_seq, lemma_seq, pos_seq, span_to_type, True)
-
-        # Save the new alignments.
-        print >> alignment_wf, "Sentence #%d" % sent_idx
-        for (tok_idx, curr_tok) in enumerate(tok_seq):
-
-            if tok_idx in visited_idxs:
-                continue
-            start = tok_idx
-            rel_align_str = "NONE"
-            if tok_idx in tok2rels:
-                rel_align_str = "#".join([amr.edges[edge_idx].label for edge_idx in tok2rels[tok_idx]])
-
-            if start in start2end and start in new_start_to_end:
-                end, wiki_l, cate_l, node_l = new_start_to_end[start], wiki_map[start], category_map[start], node_map[start]
-                if cate_l == "MULT":
-                    root_entity_num[node_l] += 1
-
-                visited_idxs |= set(range(start, end))
-                assert node_l != "NONE", "%d-%d, %s, %s\n" % (start, end, node_l, cate_l)
-            else:
-                end, wiki_l, cate_l, node_l = start + 1, "NONE", "NONE", "NONE"
-                visited_idxs.add(start)
-
-            attrs = ["%d-%d" % (start, end)]
-            tok_str = " ".join(tok_seq[start:end])
-            lem_str = " ".join(lemma_seq[start:end])
-            attrs.append(tok_str)
-            attrs.append(cate_l)
-            attrs.append(node_l)
-            concept_category = getCategories(node_l, frequent_set)
-            attrs.append(concept_category)
-            attrs.append(rel_align_str)
-            attrs.append(wiki_l)
-
-            if tok_str in tok_to_categories:
-                concept_str = tok_to_concept[tok_str]
-                concept_category = tok_to_categories[tok_str]
-            elif lem_str in tok_to_categories:
-                concept_str = tok_to_concept[lem_str]
-                concept_category = tok_to_categories[lem_str]
-            conceptID_seq.append((tok_str, lem_str, in_bracket(start, end, tok_seq), wiki_l,
-                                  concept_str, concept_category))
-
-            print >> alignment_wf, " ||| ".join(attrs)
-        print >> alignment_wf, ""
-
-        assert len(conceptID_seq) == len(collapsed_toks), "%s\n%s\n" % (str(conceptID_seq), str(collapsed_toks))
-
-        # Save the concept alignment
-        mle_concept_seq = [concept for (_, _, _, _, concept, _) in conceptID_seq]
-        mle_category_seq = [category for (_, _, _, _, _, category) in conceptID_seq]
-        for (tok_idx, curr_tok) in enumerate(collapsed_toks):
-            curr_tok_str, curr_lem_str, bracket, wiki_repr, _, category = conceptID_seq[tok_idx]
-            if curr_tok == "NE" or "NE_" in curr_tok or curr_tok == "DATE" or curr_tok == "NUMBER":
-                continue
-
-            else:
-                if curr_tok_str in ambiguous_toks or curr_lem_str in ambiguous_lems:
-                    feats = [wiki_repr]
-                else:
-                    continue
-            tok_features(feats, collapsed_toks, tok_idx, 2, "tok")
-            tok_features(feats, collapsed_lem, tok_idx, 2, "lem")
-            tok_features(feats, collapsed_pos, tok_idx, 3, "pos")
-            tok_features(feats, mle_concept_seq, tok_idx, 2, "concept")
-            tok_features(feats, mle_category_seq, tok_idx, 3, "cate")
-            feats.append("tok=%s" % curr_tok_str)
-            feats.append("lem=%s" % curr_lem_str)
-            if bracket:
-                feats.append("inbracket=true")
-            else:
-                feats.append("inbracket=false")
-
-            print >> concept_example_wf, "\t".join(feats)
-
-        assert len(tok_seq) == len(pos_seq)
-
-        new_amr.set_sentence(collapsed_toks)
-        new_amr.set_lemmas(collapsed_lem)
-        new_amr.set_poss(collapsed_pos)
+        new_amr.set_sentence(orig_tok_seq)
+        new_amr.set_lemmas(lemma_seq)
+        new_amr.set_poss(pos_seq)
         new_amr.setStats(amr_statistics)
 
         span_idxes = []
         for node_idx in new_alignment:
-            for (start, end) in new_alignment[node_idx]:
-                span_idxes.append((start, end, node_idx))
+            sorted_align = sorted(new_alignment[node_idx])
+            start, end = sorted_align[0]
+            span_idxes.append((start, end, node_idx))
         sorted_idxes = sorted(span_idxes, key=lambda x: (x[0], x[1]))
 
         sorted_idxes = [z for (x, y, z) in sorted_idxes]
 
-        pi_seq, edge_map, edge_list = buildPiSeq(new_amr, collapsed_toks, new_alignment, sorted_idxes)
+        pi_seq, edge_map, edge_list = buildPiSeq(new_amr, new_alignment, sorted_idxes)
         assert len(pi_seq) == len(new_amr.nodes)
 
         print >> conll_wf, 'sentence %d' % sent_idx
-        print >> tok_wf, (" ".join(collapsed_toks))
-        print >> lemma_wf, (" ".join(collapsed_lem))
-        print >> pos_wf, (" ".join(collapsed_pos))
-        print str(new_amr)
 
         origToNew = {}
         for (i, index) in enumerate(pi_seq):
             assert index not in origToNew
             origToNew[index] = i
 
+        aligned_set = set()
         #Output the graph file in a conll format
         for (i, index) in enumerate(pi_seq):
             line_reps = []
             curr_node = new_amr.nodes[index]
             line_reps.append(str(i))
-            word_indices = []
+            curr_span = None
 
             subgraph_repr = "NONE"
             if index in new_alignment:
                 assert index in nodeid_to_repr
                 tok_repr, subgraph_repr, category = nodeid_to_repr[index]
+                tok_repr = " ".join(tok_repr.split("_")).replace(" - ", "-")
+                tok_repr = "_".join(tok_repr.split(" "))
                 subgraph_repr = "%s||%s" % (tok_repr, subgraph_repr)
 
-                for (start, end) in new_alignment[index]:
-                    for tok_id in xrange(start, end):
-                        word_indices.append(tok_id)
+                curr_span = sorted(new_alignment[index])[0]
 
             var_bit = '1' if curr_node.is_var_node() else '0'
             line_reps.append(var_bit)
@@ -709,14 +535,19 @@ def linearize_amr(args):
             if " " in concept_repr:
                 concept_repr = "_".join(concept_repr.split())
             line_reps.append(concept_repr)
-            word_repr = '#'.join([str(tok_id) for tok_id in word_indices]) if word_indices else 'NONE'
+
+            try:
+                word_repr = "%d-%d" % (tok_to_orig[curr_span[0]], tok_to_orig[curr_span[1]-1]+1) if curr_span else 'NONE'
+            except:
+                print tok_to_orig, curr_span
+                sys.exit(1)
             line_reps.append(word_repr)
             child_triples = curr_node.childTriples()
-            child_repr = '#'.join(['%s:%d' % (label, origToNew[tail_idx]) for (label, tail_idx) \
+            child_repr = '#'.join(['%s:%d' % (reduce_op(label), origToNew[tail_idx]) for (label, tail_idx) \
                     in child_triples]) if child_triples else 'NONE'
             line_reps.append(child_repr)
             parent_triples = curr_node.parentTriples()
-            parent_repr = '#'.join(['%s:%d' % (label, origToNew[head_idx]) for (label, head_idx) \
+            parent_repr = '#'.join(['%s:%d' % (reduce_op(label), origToNew[head_idx]) for (label, head_idx) \
                     in parent_triples]) if parent_triples else 'NONE'
             line_reps.append(parent_repr)
             line_reps.append(concept_category)
@@ -724,73 +555,70 @@ def linearize_amr(args):
             print >> conll_wf, ('\t'.join(line_reps))
         print >> conll_wf, ''
 
-    logger.writeln("A total of %d sentences with unaligned entities" % unaligned_sents)
+    # logger.writeln("A total of %d sentences with unaligned entities" % unaligned_sents)
 
     conll_wf.close()
-    tok_wf.close()
-    lemma_wf.close()
-    pos_wf.close()
-    alignment_wf.close()
-    old_align_wf.close()
-    concept_example_wf.close()
+    # tok_wf.close()
+    # lemma_wf.close()
+    # pos_wf.close()
+    # alignment_wf.close()
+    # old_align_wf.close()
+    # concept_example_wf.close()
 
-    for tok_s in tok2counts:
-        sorted_map_counts = sorted(tok2counts[tok_s].items(), key=lambda x:-x[1])
-        mle_map[tok_s] = tuple(sorted_map_counts[0][0].split("||"))
+    #for tok_s in tok2counts:
+    #    sorted_map_counts = sorted(tok2counts[tok_s].items(), key=lambda x:-x[1])
+    #    mle_map[tok_s] = tuple(sorted_map_counts[0][0].split("||"))
 
-    print '######NUMBERS#######'
-    for lemma_s in lemma2counts:
-        sorted_map_counts = sorted(lemma2counts[lemma_s].items(), key=lambda x:-x[1])
-        mleLemmaMap[lemma_s] = tuple(sorted_map_counts[0][0].split("||"))
-        if mleLemmaMap[lemma_s][0] == 'NUMBER':
-            print lemma_s
+    #print '######NUMBERS#######'
+    #for lemma_s in lemma2counts:
+    #    sorted_map_counts = sorted(lemma2counts[lemma_s].items(), key=lambda x:-x[1])
+    #    mleLemmaMap[lemma_s] = tuple(sorted_map_counts[0][0].split("||"))
+    #    if mleLemmaMap[lemma_s][0] == 'NUMBER':
+    #        print lemma_s
 
-    # Then dump all the training statistics.
-    # First edges statistics.
-    if args.table_dir:
+    ## Then dump all the training statistics.
+    ## First edges statistics.
+    #if args.table_dir:
 
-        os.system("mkdir -p %s" % args.table_dir)
+    #    os.system("mkdir -p %s" % args.table_dir)
 
-        conceptIDStats = os.path.join(args.table_dir, "tokToConcepts.txt")
-        lemmaConceptStats = os.path.join(args.table_dir, "lemToConcepts.txt")
+    #    conceptIDStats = os.path.join(args.table_dir, "tokToConcepts.txt")
+    #    lemmaConceptStats = os.path.join(args.table_dir, "lemToConcepts.txt")
 
-        conceptOutStats = os.path.join(args.table_dir, "concept_rels.txt")
-        saveMLE(conceptOutgoFreq, conceptToOutGo, conceptOutStats)
+    #    conceptOutStats = os.path.join(args.table_dir, "concept_rels.txt")
+    #    saveMLE(conceptOutgoFreq, conceptToOutGo, conceptOutStats)
 
-        conceptIncomeStats = os.path.join(args.table_dir, "concept_incomes.txt")
-        saveMLE(conceptIncomeFreq, conceptToIncome, conceptIncomeStats)
+    #    conceptIncomeStats = os.path.join(args.table_dir, "concept_incomes.txt")
+    #    saveMLE(conceptIncomeFreq, conceptToIncome, conceptIncomeStats)
 
-        conceptIDcountStats = os.path.join(args.table_dir, "conceptIDcounts.txt")
-        saveMLE(tok_counts, tok2counts, conceptIDcountStats)
+    #    conceptIDcountStats = os.path.join(args.table_dir, "conceptIDcounts.txt")
+    #    saveMLE(tok_counts, tok2counts, conceptIDcountStats)
 
-        lemmaIDcountStats = os.path.join(args.table_dir, "lemmaIDcounts.txt")
-        saveMLE(lem_counts, lemma2counts, lemmaIDcountStats)
+    #    lemmaIDcountStats = os.path.join(args.table_dir, "lemmaIDcounts.txt")
+    #    saveMLE(lem_counts, lemma2counts, lemmaIDcountStats)
 
-        multigraphStats = os.path.join(args.table_dir, "multigraph_counts.txt")
-        saveCounter(multi_map, multigraphStats)
+    #    multigraphStats = os.path.join(args.table_dir, "multigraph_counts.txt")
+    #    saveCounter(multi_map, multigraphStats)
 
-        conceptStats = os.path.join(args.table_dir, "concept_counts.txt")
-        saveCounter(concept_counts, conceptStats)
+    #    conceptStats = os.path.join(args.table_dir, "concept_counts.txt")
+    #    saveCounter(concept_counts, conceptStats)
 
-        relationStats = os.path.join(args.table_dir, "relation_counts.txt")
-        saveCounter(relcounts, relationStats)
+    #    relationStats = os.path.join(args.table_dir, "relation_counts.txt")
+    #    saveCounter(relcounts, relationStats)
 
-        multiRootStats = os.path.join(args.table_dir, "multiroots_counts.txt")
-        saveCounter(root_entity_num, multiRootStats)
+    #    categoryStats = os.path.join(args.table_dir, "train_categories.txt")
+    #    saveSetorList(frequent_set | set(["NE", "NUMBER", "DATE", "PRED", "OTHER"]), categoryStats)
 
-        categoryStats = os.path.join(args.table_dir, "train_categories.txt")
-        saveSetorList(frequent_set | set(["NE", "NUMBER", "DATE", "PRED", "OTHER"]), categoryStats)
+    #    ambiguousToksStats = os.path.join(args.table_dir, "ambiguous_toks.txt")
+    #    ambiguousLemsStats = os.path.join(args.table_dir, "ambiguous_lems.txt")
+    #    saveSetorList(ambiguous_toks, ambiguousToksStats)
+    #    saveSetorList(ambiguous_lems, ambiguousLemsStats)
 
-        ambiguousToksStats = os.path.join(args.table_dir, "ambiguous_toks.txt")
-        ambiguousLemsStats = os.path.join(args.table_dir, "ambiguous_lems.txt")
-        saveSetorList(ambiguous_toks, ambiguousToksStats)
-        saveSetorList(ambiguous_lems, ambiguousLemsStats)
+    #    mle_map = filterNoise(mle_map, './conceptIDCounts.dict.weird.txt')
+    #    mleLemmaMap = filterNoise(mleLemmaMap, './lemConceptIDCounts.dict.weird.txt')
 
-        mle_map = filterNoise(mle_map, './conceptIDCounts.dict.weird.txt')
-        mleLemmaMap = filterNoise(mleLemmaMap, './lemConceptIDCounts.dict.weird.txt')
-
-        dumpMap(mle_map, conceptIDStats)
-        dumpMap(mleLemmaMap, lemmaConceptStats)
+    #    dumpMap(mle_map, conceptIDStats)
+    #    dumpMap(mleLemmaMap, lemmaConceptStats)
 
     # linearizeData(mle_map, mleLemmaMap, phrases, args.dev_dir, args.dev_output)
     # linearizeData(mle_map, mleLemmaMap, phrases, args.test_dir, args.test_output)
@@ -836,6 +664,352 @@ def check_and_sentences(sent_str, delimiter=" ; ", tok_num=1):
         return True
     return False
 
+def initializeConceptID(args):
+
+    def removeFormat(tok):
+        while tok and allSymbols(tok[0]):
+            tok = tok[1:]
+        while tok and allSymbols(tok[-1]):
+            tok = tok[:-1]
+        if len(tok) > 2 and tok[-2:] == "'s":
+            tok =tok[:-2]
+
+        # if tok[0] == "\"" and tok[-1] == "\"":
+        #     tok = tok[1:-1]
+        return tok
+
+    def getEntityAttrs(subgraph_repr):
+        fields = subgraph_repr.split(" ")
+        entity_name = fields[0][1:]
+        last_op = False
+        op_toks = []
+        wiki_name = None
+        last_wiki = False
+        for tok in fields[1:]:
+            if tok == ":op":
+                last_op = True
+            elif tok == ":wiki":
+                last_wiki = True
+            else:
+                if last_op: # Processing an op of entity.
+                    tmp_tok = removeFormat(tok)
+                    if tmp_tok:
+                        op_toks.append(tmp_tok)
+                    else:
+                        op_toks.append(tok)
+                    last_op = False
+                if last_wiki:
+                    tok = removeFormat(tok)
+                    wiki_name = tok
+                    last_wiki = False
+        return entity_name, op_toks, wiki_name
+
+    def identifyNumber(seq, mle_map):
+        quantities = set(['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'billion',
+                          'tenth', 'million', 'thousand', 'hundred', 'viii', 'eleven', 'twelve', 'thirteen', 'iv'])
+        for tok in seq:
+            if tok in mle_map and mle_map[tok][0] != 'NUMBER':
+                return False
+            elif not (isNumber(tok) or tok in quantities):
+                return False
+        return True
+
+    os.system("mkdir -p %s" % args.output)
+
+    freq_path = args.freq_dir
+
+    conceptIDPath = os.path.join(freq_path, "tokToConcepts.txt")
+    # lemmaToConceptPath = os.path.join(freq_path, "lemToConcepts.txt")
+    phrasePath = os.path.join(freq_path, "phrases")
+    verbalization_path = os.path.join(args.resource_dir, "verbalization-list-v1.01.txt")
+    VERB_LIST = load_verb_list(verbalization_path)
+
+    feat_dim = 72 + args.cache_size * 5
+
+    mle_map = loadMLEFile(conceptIDPath)
+
+    date_set = set([line.strip() for line in open(args.date_file)])
+    date_to_orig = {}
+    date_repr_map = {" @ - @ ": "-", " @ :@ ": ":", " th": "th", " rd": "rd", " s": "s", " st": "st", " nd": "nd"}
+    for date_repr in copy.copy(date_set):
+        new_repr = date_repr
+        for k in date_repr_map:
+            while k in new_repr:
+                new_repr = new_repr.replace(k, date_repr_map[k])
+        if new_repr != date_repr:
+            date_set.add(new_repr)
+            date_to_orig[new_repr] = date_repr
+
+    # mleLemmaMap = loadMLEFile(lemmaToConceptPath)
+
+    tok_file = os.path.join(args.data_dir, 'token')
+    lem_file = os.path.join(args.data_dir, 'lemma')
+    pos_file = os.path.join(args.data_dir, 'pos')
+    # ner_file = os.path.join(args.data_dir, 'ner')
+    # date_file = os.path.join(args.data_dir, 'date')
+
+    align_tok_file = os.path.join(args.data_dir, "cdec_tok")
+    conceptID_file = os.path.join(args.data_dir, "conceptID")
+    conceptID_maps = loadJAMRConceptID(conceptID_file)
+
+    frequent_set = loadFrequentSet(args.freq_dir)
+
+    orig_toks, toks = loadTokens(tok_file), loadTokens(align_tok_file)
+    lems, poss = loadTokens(lem_file), loadTokens(pos_file)
+
+    json_output = os.path.join(args.output, "decode.json")
+    output_conll = os.path.join(args.data_dir, "concept")
+
+    # feat_dim = 75 # Currently fixed
+
+    oracle_set = OracleData()
+
+    conll_wf = open(output_conll, 'w')
+    max_num_len = 6
+    max_phrase_len = 4
+
+    # Map from a frequent phrase to its most frequent concept.
+    phrase_map = utils.loadPhrases(phrasePath)
+
+    # assert len(conceptID_maps) == 1368, len(conceptID_maps)
+
+    for (sent_idx, tok_seq) in enumerate(toks):
+
+        # if sent_idx != 666:
+        #     continue
+
+        orig_tok_seq = orig_toks[sent_idx]
+        lemma_seq, pos_seq = lems[sent_idx], poss[sent_idx]
+        assert len(orig_tok_seq) == len(pos_seq)
+        assert equals("".join(orig_tok_seq), "".join(tok_seq))
+
+        tok_to_orig = realign_sentence(orig_tok_seq, tok_seq)
+        # print sent_idx
+        # print tok_seq, orig_tok_seq
+        # print tok_to_orig
+
+        conceptID_map = conceptID_maps[sent_idx]
+
+        # print "concept id", conceptID_map
+
+        concept_seq, category_seq, map_info_seq = [], [], []
+        # concept_to_word = []
+
+        # and_structure = check_and_sentences(" ".join(tok_seq))
+        # multi_tok_and = check_and_sentences(" ".join(tok_seq), tok_num=5)
+        # if and_structure:
+        #     a = 5
+        #     # print "sentence index %d" % sent_idx
+        #     # print " ".join(tok_seq)
+        # elif multi_tok_and:
+        #     print " ".join(tok_seq)
+
+        start_to_end = startToEnd(conceptID_map)
+
+        concept_to_word = []
+        span_seq = []
+
+        # if multi_tok_and:
+        #     concept_seq.append("and")
+        #     category_seq.append("and")
+        #     if and_structure:
+        #         map_info_seq.append("AND||AND")
+        #     else:
+        #         map_info_seq.append("AND1||AND1")
+        #     concept_to_word.append(-1)
+        #     span_seq.append((-1, -1))
+
+        entity_tok_set = set()
+        entity_repr_set = set()
+
+        visited = set()
+        for start in xrange(len(tok_seq)):
+            if start in visited:
+                continue
+            for end_idx in xrange(len(tok_seq)-1, start, -1):
+                curr_span = " ".join(tok_seq[start:end_idx])
+                if curr_span in date_set:
+                    concept_seq.append("DATE")
+                    category_seq.append("DATE")
+                    if curr_span in date_to_orig:
+                        curr_span = date_to_orig[curr_span]
+
+                    map_info = "%s||NONE" % curr_span.replace(" ", "_")
+                    map_info_seq.append(map_info)
+                    span_seq.append((start, end_idx))
+                    curr_set = set(xrange(start, end_idx))
+                    visited |= curr_set
+                    print "Found DATE:", curr_span
+                    break
+            if start in visited:
+                continue
+            if start in start_to_end:
+                end = start_to_end[start]
+
+                curr_set = set(xrange(start, end))
+                span_repr, subgraph_repr = conceptID_map[(start, end)]
+                assert span_repr == " ".join(tok_seq[start:end])
+
+                if ":op" in subgraph_repr and ":name" in subgraph_repr: # NER.
+                    # if len(curr_set & visited) != 0:
+                    #     print "Error alignment: entity", subgraph_repr
+                    print "%d-%d"% (start, end), "NER", subgraph_repr
+                    if subgraph_repr in entity_repr_set:
+                        print "Pruned duplicate entity", subgraph_repr
+                        continue
+                    if in_bracket(start, end, tok_seq) and (start-2) in entity_tok_set:
+                        print "Pruned abbreviation:", " ".join(tok_seq[start:end])
+                        entity_tok_set |= curr_set
+                        continue
+                    entity_name, op_toks, wiki_name = getEntityAttrs(subgraph_repr)
+                    if len(op_toks) == 1:
+                        tok_repr = op_toks[0]
+                    else:
+                        tok_repr = "_".join(tok_seq[start:end]).replace("_@_-_@_", "-")
+                    if wiki_name is None:
+                        wiki_name = "-"
+                    entity_tok_set |= curr_set
+                    map_info = "%s||%s" % (tok_repr, wiki_name)
+                    map_info_seq.append(map_info)
+                    ne_type = "NE_%s" % entity_name
+                    concept_seq.append(ne_type)
+                    category_seq.append(getCategories(ne_type, frequent_set))
+                    span_seq.append((start, end))
+                    visited |= curr_set
+
+                elif "date-entity" in subgraph_repr:
+                    concept_seq.append("DATE")
+                    category_seq.append("DATE")
+                    map_info = "%s||NONE" % "_".join(tok_seq[start:end])
+                    map_info_seq.append(map_info)
+                    span_seq.append((start, end))
+                    visited |= curr_set
+
+                else:
+                    # Try to align phrases.
+                    for new_end_idx in xrange(start+2, start+max_phrase_len):
+                        if new_end_idx > len(tok_seq):
+                            break
+                        curr_repr = " ".join(tok_seq[start:end])
+                        if curr_repr in phrase_map:
+
+                            concept_repr = phrase_map[curr_repr]
+                            concept_seq.append(concept_repr)
+                            category = getCategories(concept_repr, frequent_set)
+                            category_seq.append(category)
+                            map_info = "%s||%s" % ("_".join(tok_seq[start:new_end_idx]), concept_repr)
+                            map_info_seq.append(map_info)
+                            end = new_end_idx
+                            span_seq.append((start, end))
+                            visited |= set(xrange(start, end))
+                            break
+
+                    # Try to align numbers.
+                    for new_end_idx in xrange(start+max_num_len, start, -1):
+                        if new_end_idx > len(tok_seq):
+                            continue
+                        curr_set = set(xrange(start, new_end_idx))
+                        if len(visited & curr_set) != 0:
+                            continue
+
+                        if identifyNumber(tok_seq[start:new_end_idx], mle_map):
+                            concept_seq.append("NUMBER")
+                            category_seq.append("NUMBER")
+                            map_info = "%s||NONE" % "_".join(tok_seq[start:new_end_idx])
+                            map_info_seq.append(map_info)
+                            span_seq.append((start, new_end_idx))
+                            visited |= set(range(start, new_end_idx))
+                            break
+                if start not in visited: # Then try to match
+                    end = start_to_end[start]
+                    tok_repr = "_".join(tok_seq[start:end])
+                    if " :" in subgraph_repr: # Multiple
+                        assert subgraph_repr[0] == "(" and subgraph_repr[-1] == ")", subgraph_repr
+                        root_repr = subgraph_repr.split()[0].strip()[1:]
+                        category = "MULT_%s" % root_repr
+                        concept_seq.append(category)
+                        category = getCategories(category, frequent_set)
+                    else: # A single concept
+                        assert subgraph_repr[0] != "(", subgraph_repr
+                        concept_seq.append(subgraph_repr)
+                        category = getCategories(subgraph_repr, frequent_set)
+                    category_seq.append(category)
+                    map_info = "%s||%s" % (tok_repr, subgraph_repr)
+                    map_info_seq.append(map_info)
+                    span_seq.append((start, end))
+                    visited |= set(xrange(start, end))
+            else:
+                curr_tok = tok_seq[start]
+                orig_tok_pos = tok_to_orig[start]
+                curr_lem = orig_tok_seq[orig_tok_pos]
+                if curr_tok in VERB_LIST or curr_lem in VERB_LIST:
+                    if curr_tok in VERB_LIST:
+                        subgraph = VERB_LIST[curr_tok][0]
+                    else:
+                        subgraph = VERB_LIST[curr_lem][0]
+                    subgraph_repr = alignment_utils.subgraph_str(subgraph)
+                    print "Retrieved %s -> %s" % (curr_tok, subgraph_repr)
+                    root_repr = subgraph_repr.split()[0].strip()
+                    if " :" in subgraph_repr:
+                        category = "MULT_%s" % root_repr
+                    else:
+                        assert root_repr == subgraph_repr
+                        category = getCategories(subgraph_repr, frequent_set)
+                    concept_seq.append(category)
+                    category = getCategories(category, frequent_set)
+                    category_seq.append(category)
+                    if " :" in subgraph_repr:
+                        map_info = "%s||(%s)" % (curr_tok, subgraph_repr)
+                    else:
+                        map_info = "%s||%s" % (curr_tok, subgraph_repr)
+                    map_info_seq.append(map_info)
+                    span_seq.append((start, start+1))
+
+        # Then save the output to AMR conll format.
+        assert len(span_seq) == len(concept_seq)
+        print >> conll_wf, "sentence %d" % sent_idx
+        visited = set()
+
+        # print "span sequence", span_seq
+
+        for (concept_idx, concept) in enumerate(concept_seq):
+            # if multi_tok_and and concept_idx == 0:
+            #     continue
+            start, end = span_seq[concept_idx]
+            # print start, end
+            orig_start, orig_end = tok_to_orig[start], tok_to_orig[end-1] + 1
+            curr_set = set(xrange(orig_start, orig_end))
+            print >> conll_wf, "%d\t%s\t%s\t%s\t%s" % (
+                     concept_idx, concept, category_seq[concept_idx], map_info_seq[concept_idx],
+                      "_".join(orig_tok_seq[orig_start:orig_end]))
+
+            if len(curr_set & visited) == 0: #
+                concept_to_word.append(orig_end-1)
+            else: # Assume it's not aligned.
+                concept_to_word.append(-1)
+
+            visited |= curr_set
+
+        print >> conll_wf, ""
+        # print orig_tok_seq, len(orig_tok_seq)
+        # print concept_seq, len(concept_seq)
+        # print concept_to_word, len(concept_to_word)
+
+        # Next we prepare the input files for the decoder.
+        oracle_seq = ["SHIFT", "POP"] * len(concept_seq)
+        num_actions = len(oracle_seq) # "SHIFT", "POP" for each concept
+        feat_seq = [[""] * feat_dim for _ in xrange(num_actions)]
+        word_align = [-1] * num_actions
+        concept_align = [-1] * num_actions
+        assert len((" ").join(concept_seq).split(" ")) == len(concept_seq), concept_seq
+        oracle_example = OracleExample(orig_tok_seq, lemma_seq,
+                                       pos_seq, concept_seq, category_seq, map_info_seq, feat_seq,
+                                       oracle_seq, word_align, concept_align, concept_to_word)
+        oracle_set.addExample(oracle_example)
+
+    conll_wf.close()
+    oracle_set.toJSON(json_output)
+
 #Given the original text, generate the categorized text
 def linearizeData(args, data_dir, freq_path, output_dir, save_mode=False):
 
@@ -866,6 +1040,8 @@ def linearizeData(args, data_dir, freq_path, output_dir, save_mode=False):
     conceptIDPath = os.path.join(freq_path, "tokToConcepts.txt")
     lemmaToConceptPath = os.path.join(freq_path, "lemToConcepts.txt")
     phrasePath = os.path.join(freq_path, "phrases")
+    verbalization_path = os.path.join(args.resource_dir, "verbalization-list-v1.01.txt")
+    VERB_LIST = load_verb_list(verbalization_path)
 
     mle_map = loadMLEFile(conceptIDPath)
     mleLemmaMap = loadMLEFile(lemmaToConceptPath)
@@ -920,7 +1096,6 @@ def linearizeData(args, data_dir, freq_path, output_dir, save_mode=False):
                 date_repr = " ".join(tok_seq[start:end])
                 if date_repr in mle_map and mle_map[date_repr][0] != "DATE":
                     continue
-
 
                 (new_start, new_end) = searchSeq(date_repr.replace(" ", ""), tokenized, new_idx)
                 if new_start == -1:
@@ -1118,8 +1293,7 @@ def linearizeData(args, data_dir, freq_path, output_dir, save_mode=False):
 
             all_date_spans.append(new_date_spans)
             all_ner_spans.append(new_entity_spans)
-        # for abbre_name in abbrev_to_fullname:
-        #     print "%s ## %s" % (abbre_name, abbrev_to_fullname[abbre_name])
+
         saveSpanMap(all_date_spans, date_output)
         saveSpanMap(all_ner_spans, ner_output)
     else:
@@ -1138,7 +1312,7 @@ def linearizeData(args, data_dir, freq_path, output_dir, save_mode=False):
         json_output = os.path.join(args.run_dir, "decode.json")
         output_conll = os.path.join(args.run_dir, "concept")
 
-        feat_dim = 97 # Currently fixed
+        feat_dim = 75 # Currently fixed
 
         oracle_set = OracleData()
 
@@ -1160,13 +1334,13 @@ def linearizeData(args, data_dir, freq_path, output_dir, save_mode=False):
             concept_to_word = []
 
             and_structure = check_and_sentences(" ".join(tok_seq))
-            multi_tok_and = check_and_sentences(" ".join(tok_seq), tok_num=3)
+            multi_tok_and = check_and_sentences(" ".join(tok_seq), tok_num=5)
             if and_structure:
-                print "sentence index %d" % sent_idx
+                a = 5
+                # print "sentence index %d" % sent_idx
+                # print " ".join(tok_seq)
+            elif multi_tok_and:
                 print " ".join(tok_seq)
-
-            # else:
-            #     continue
 
             span_to_type = {}
 
@@ -1276,7 +1450,8 @@ def linearizeData(args, data_dir, freq_path, output_dir, save_mode=False):
                         if utils.special_categories(category):
                             concept_seq.append(category)
                         else:
-                            concept_seq.append(concept_repr)
+                            # assert " " not in concept_repr, concept_repr
+                            concept_seq.append(concept_repr.split(" ")[0])
                         map_repr = concept_repr
                         if concept_repr[:3] == "NEG":
                             map_repr = "%s polarity:-" % concept_repr[4:]
@@ -1292,7 +1467,7 @@ def linearizeData(args, data_dir, freq_path, output_dir, save_mode=False):
                     else:
                         subgraph = VERB_LIST[curr_lem][0]
                     subgraph_repr = alignment_utils.subgraph_str(subgraph)
-                    print "Retrieved: %s -> %s" % (curr_tok, subgraph_repr)
+                    # print "Retrieved: %s -> %s" % (curr_tok, subgraph_repr)
                     root_repr = subgraph_repr.split()[0].strip()
                     category = "MULT_%s" % root_repr
                     span_to_type[(tok_idx, tok_idx+1)] = (-1, subgraph_repr, category)
@@ -1341,6 +1516,7 @@ def linearizeData(args, data_dir, freq_path, output_dir, save_mode=False):
             feat_seq = [[""] * feat_dim for _ in range(num_actions)]
             word_align = [-1] * num_actions
             concept_align = [-1] * num_actions
+            assert len((" ").join(concept_seq).split(" ")) == len(concept_seq), concept_seq
             oracle_example = OracleExample(collapsed_toks, collapsed_lem,
                                            collapsed_pos, concept_seq, category_seq, map_info_seq, feat_seq,
                                            oracle_seq, word_align, concept_align, concept_to_word)
@@ -1367,11 +1543,13 @@ if __name__ == '__main__':
     argparser.add_argument("--task", type=str, help="the task to run", required=True)
 
     argparser.add_argument("--amr_file", type=str, help="the original AMR graph files", required=False)
+    argparser.add_argument("--format", type=str, help="alignment format. JAMR or semeval alignments", required=False)
     argparser.add_argument("--input_file", type=str, help="the original sentence file", required=False)
     argparser.add_argument("--token_file", type=str, help="the tokenized sentence file", required=False)
+    argparser.add_argument("--resource_dir", type=str, help="the directory for saving resources", required=False)
     argparser.add_argument("--align_file", type=str, help="the original AMR graph files", required=False)
     argparser.add_argument("--output", type=str, help="the output file", required=False)
-    argparser.add_argument("--conll_file", type=str, help="output the AMR graph in conll format", required=False)
+    # argparser.add_argument("--conll_file", type=str, help="output the AMR graph in conll format", required=False)
     argparser.add_argument("--dev_dir", type=str, help="the data directory for dumped AMR graph objects, alignment and tokenized sentences")
     argparser.add_argument("--test_dir", type=str, help="the data directory for dumped AMR graph objects, alignment and tokenized sentences")
     argparser.add_argument("--dev_output", type=str, help="the data directory for dumped AMR graph objects, alignment and tokenized sentences")
@@ -1391,6 +1569,8 @@ if __name__ == '__main__':
     argparser.add_argument("--save_mode", action="store_true", help="if to update entity stats")
     argparser.add_argument("--stats_dir", type=str, help="the statistics directory")
     argparser.add_argument("--freq_dir", type=str, help="the training frequency statistics")
+    argparser.add_argument("--feat_num", type=int, default=50, help="number of features")
+    argparser.add_argument("--cache_size", type=int, default=5, help="cache size of the transition system")
     argparser.add_argument("--min_prd_freq", type=int, default=50, help="threshold for filtering predicates")
     argparser.add_argument("--min_var_freq", type=int, default=50, help="threshold for filtering non predicate variables")
     argparser.add_argument("--index_unknown", action="store_true", help="if to index the unknown predicates or non predicate variables")
@@ -1402,4 +1582,5 @@ if __name__ == '__main__':
     elif args.task == "categorize":
         linearize_amr(args)
     else:
-        linearizeData(args, args.data_dir, args.freq_dir, args.output, args.save_mode)
+        # linearizeData(args, args.data_dir, args.freq_dir, args.output, args.save_mode)
+        initializeConceptID(args)

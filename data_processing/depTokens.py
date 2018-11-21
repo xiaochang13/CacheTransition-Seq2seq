@@ -1,43 +1,59 @@
 #!/usr/bin/python
-import sys, os
+import os
+import argparse
+from nltk.stem.wordnet import WordNetLemmatizer
+import lemmatize_snts
 
-sent_index = 0
+def main(args):
+    dep_file = os.path.join(args.input_dir, "dep")
+    token_wf = open(os.path.join(args.input_dir, 'token'), 'w')
+    pos_wf = open(os.path.join(args.input_dir, 'pos'), 'w')
+    lemma_wf = open(os.path.join(args.input_dir, 'lemma'), 'w')
+    toks = []
+    poss = []
 
-output_dir = sys.argv[2]
-os.system("mkdir -p %s" % output_dir)
-token_wf = open(os.path.join(sys.argv[2], 'token'), 'w')
-pos_wf = open(os.path.join(sys.argv[2], 'pos'), 'w')
-toks = []
-poss = []
+    special_symbols = set()
+    special_token_map = {"-LRB-": "(", "-RRB-": ")", "-LSB-": "[", "-RSB-": "]"}
 
-special_symbols = set()
-special_token_map = {"-LRB-": "(", "-RRB-": ")", "-LSB-": "[", "-RSB-": "]"}
-for line in open(sys.argv[1]):
-    fields = line.strip().split()
-    if len(fields) < 2: #A new sent
-        sent_index += 1
-        print >> token_wf, (' '.join(toks))
-        print >> pos_wf, (' '.join(poss))
-        toks = []
-        poss = []
-        continue
+    der_lemma = lemmatize_snts.initialize_lemma(args.lemma_file)
 
-    curr_tok = fields[1].strip()
+    lmtzer = WordNetLemmatizer()
+    for line in open(dep_file):
+        fields = line.strip().split()
+        if len(fields) < 2: #A new sent
+            lemmas = lemmatize_snts.lemmatize_sentence(toks, poss, der_lemma, lmtzer)
+            assert len(toks) == len(lemmas)
+            print >> token_wf, (' '.join(toks))
+            print >> pos_wf, (' '.join(poss))
+            print >> lemma_wf, (' '.join(lemmas))
+            toks = []
+            poss = []
+            continue
 
-    for sp in special_token_map:
-        if sp in curr_tok:
-    #if curr_tok in special_token_map:
-            curr_tok = curr_tok.replace(sp, special_token_map[sp])
+        curr_tok = fields[1].strip()
 
-    toks.append(curr_tok)
-    if curr_tok[0] == '-' and curr_tok[-1] == '-':
-        if len(curr_tok) > 2:
-            special_symbols.add(curr_tok)
+        for sp in special_token_map:
+            if sp in curr_tok:
+                curr_tok = curr_tok.replace(sp, special_token_map[sp])
 
-    poss.append(fields[4].strip())
-    # assert fields[3].strip() == fields[4].strip()
+        toks.append(curr_tok)
+        if curr_tok[0] == '-' and curr_tok[-1] == '-':
+            if len(curr_tok) > 2:
+                special_symbols.add(curr_tok)
 
-token_wf.close()
-pos_wf.close()
-print special_symbols
+        poss.append(fields[4].strip())
+
+    token_wf.close()
+    pos_wf.close()
+    print special_symbols
+
+
+if __name__ == '__main__':
+    argparser = argparse.ArgumentParser()
+
+    argparser.add_argument("--input_dir", type=str, help="the input directory, containing token and pos tags")
+    argparser.add_argument("--lemma_file", type=str, help="celex lemma file", required=False)
+
+    args = argparser.parse_args()
+    main(args)
 
