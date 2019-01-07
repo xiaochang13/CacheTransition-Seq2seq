@@ -26,7 +26,7 @@ Based on concepts and the corresponding AMR algorithm, our oracle algorithm dete
 
 ## Decoding
 
-Simply execute the corresponding decoding script with one argument being the identifier of the model you want to use. For instance, you can execute "./eval.sh bch20_lr1e3_l21e3"
+Simply execute the corresponding decoding script with one argument being the identifier of the model you want to use. For instance, you can execute "./decode.sh bch20_lr1e3_l21e3"
 
 ## Training
 
