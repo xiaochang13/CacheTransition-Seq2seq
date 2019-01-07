@@ -32,3 +32,19 @@ Simply execute the corresponding decoding script with one argument being the ide
 
 First, modify config.json. You should pay attention to the field "suffix", which is an identifier of the model being trained and saved. We usually use the experiment setting, such as "bch20_lr1e3_l21e3", as the identifier. Also point "train_path" and "test_path" to your corresponding files. Note that "test_path" represents the path of a development set, not the final test set.
 Finally, execute the corresponding script file, such as "./train.sh".
+
+## Cite
+
+If you like our paper, please cite
+```
+@InProceedings{peng-acl18,
+  author = {Xiaochang Peng and Linfeng Song and Daniel Gildea and Giorgio
+  Satta},
+  title = {Sequence-to-sequence Models for Cache Transition Systems},
+  booktitle = {Proceedings of the 56th Annual Meeting of the Association for
+  Computational Linguistics (ACL-18)},
+  year = {2018},
+  pages = {1842--1852},
+  URL = {https://www.cs.rochester.edu/u/gildea/pubs/peng-acl18.pdf}
+}
+'''
