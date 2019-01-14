@@ -11,6 +11,7 @@ Please create issues if there are any questions! This can make things more tract
 Before training or decoding, there is a required data preprocessing procedure. This includes a series of more specific data preprocessing steps mentioned in the paper:
 
 (1) Running JAMR
+
 This step relies on running JAMR (https://github.com/jflanigan/jamr) on the AMR data to get the pos tag, dependency information. For example: 
 ${JAMR_HOME}/scripts/train_LDC2015E86.sh
 
@@ -18,9 +19,11 @@ This will generate the results for tokenization, dependency parsing and NER tagg
 ${JAMR_HOME}/scripts/TRAIN_STAGE1_ONLY.sh
 
 (2) Categorization (Anonymization)
+
 We first collect all the JAMR output from the previous step. Then we run the the categorization step to collapse multi-concept categories (named-entity, dates, verbalization et al.). See pipeline.sh for more details (need to change two paths according to the output from the previous step).
 
 (3) Action Sequence Generation
+
 Given the input text, target categorized AMR and the alignment between them, we use the oracle algorithm to compute the oracle action sequence. See pipeline.sh for more details.
 
 ## Decoding
