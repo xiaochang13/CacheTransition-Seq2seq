@@ -455,7 +455,7 @@ def loadDataset(path):
     pos_file = os.path.join(path, "pos")
     dep_file = os.path.join(path, "dep")
     amr_conll_file = os.path.join(path, "amr_conll")
-    skip_sent_file = os.path.join(path, "skipped_sentence")
+    skip_sent_file = os.path.join(path, "skipped_sentences")
 
     skipped_oracle_sentences = set([int(line.strip()) for line in open(skip_sent_file)])
 

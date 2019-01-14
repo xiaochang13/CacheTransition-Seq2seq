@@ -725,8 +725,7 @@ def initializeConceptID(args):
     freq_path = args.freq_dir
 
     conceptIDPath = os.path.join(freq_path, "tokToConcepts.txt")
-    # lemmaToConceptPath = os.path.join(freq_path, "lemToConcepts.txt")
-    phrasePath = os.path.join(freq_path, "phrases")
+    phrasePath = os.path.join(args.phrase_file)
     verbalization_path = os.path.join(args.resource_dir, "verbalization-list-v1.01.txt")
     VERB_LIST = load_verb_list(verbalization_path)
 
@@ -746,13 +745,9 @@ def initializeConceptID(args):
             date_set.add(new_repr)
             date_to_orig[new_repr] = date_repr
 
-    # mleLemmaMap = loadMLEFile(lemmaToConceptPath)
-
     tok_file = os.path.join(args.data_dir, 'token')
     lem_file = os.path.join(args.data_dir, 'lemma')
     pos_file = os.path.join(args.data_dir, 'pos')
-    # ner_file = os.path.join(args.data_dir, 'ner')
-    # date_file = os.path.join(args.data_dir, 'date')
 
     align_tok_file = os.path.join(args.data_dir, "cdec_tok")
     conceptID_file = os.path.join(args.data_dir, "conceptID")
@@ -765,8 +760,6 @@ def initializeConceptID(args):
 
     json_output = os.path.join(args.output, "decode.json")
     output_conll = os.path.join(args.data_dir, "concept")
-
-    # feat_dim = 75 # Currently fixed
 
     oracle_set = OracleData()
 
