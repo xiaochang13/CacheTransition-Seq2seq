@@ -343,8 +343,7 @@ def linearize_amr(args):
             return "op"
         return s
 
-    os.system("mkdir -p %s" % args.run_dir)
-    logger.file = open(os.path.join(args.run_dir, 'logger'), 'w')
+    logger.file = open(os.path.join(args.data_dir, 'logger'), 'w')
 
     amr_file = os.path.join(args.data_dir, 'amr')
     alignment_file = os.path.join(args.data_dir, 'alignment')

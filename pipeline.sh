@@ -20,12 +20,13 @@ do
     cp "${NER_FILE}" "${OUTPUT_DIR}/ner"
     cat "${ALIGNED}" | grep '^# ::alignments ' | sed 's/^# ::alignments //' | sed 's/ ::annotator Aligner.*$//' > "${OUTPUT_DIR}/alignment"
 
+    # using celex lemmatization.
     python ./data_processing/depTokens.py --input_dir "${OUTPUT_DIR}" --lemma_file ./lemmas/der.lemma
-    STAGE1_OUTPUT="${JAMR_HOME}/models/conceptID" # Change this to be the JAMR stage1 output directory
 
-    CATEGORIZED_DIR="${OUTPUT_DIR}"_categorized
-    python ./data_processing/prepareTokens.py --task categorize --data_dir "${OUTPUT_DIR}" --phrase_file ./phrases --use_lemma --run_dir "${CATEGORIZED_DIR}" --stats_dir stats --table_dir train_tables --freq_dir frequency_tables --resource_dir ./resources --format jamr > "${split}".jamr.align
+    # categorization step.
+    python ./data_processing/prepareTokens.py --task categorize --data_dir "${OUTPUT_DIR}" --phrase_file ./phrases --use_lemma --stats_dir stats --table_dir train_tables --freq_dir frequency_tables --resource_dir ./resources --format jamr > "${split}".jamr.align
     
+    # oracle action sequence extraction. cache size can be changed.
     ORACLE_OUTPUT_DIR="${OUTPUT_DIR}"_oracle
     python ./oracle/oracle.py --data_dir "${OUTPUT_DIR}" --output_dir "${ORACLE_OUTPUT_DIR}" --cache_size 5
 done
@@ -33,6 +34,11 @@ done
 for split in dev test;
 do
     DATA_DIR="${PREPROCESS_INPUT_DIR}/${split}"
+
+    # use the concept identification results from step1 of JAMR
+    STAGE1_OUTPUT="${JAMR_HOME}/models/conceptID" # Change this to be the JAMR stage1 output directory
     grep "^Span" "${STAGE1_OUTPUT}/${split}.decode.stage1only.err" > "${DATA_DIR}/conceptID"
+
+    # prepare the decode input for dev and test.
     python ./data_processing/prepareTokens.py --task prepare --data_dir ${DATA_DIR} --freq_dir train_tables --output ${DATA_DIR}_cache5_decode_input --cache_size 5 --resource_dir ./resources --format jamr --date_file ./dates --phrase_file ./phrases
 done

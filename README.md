@@ -8,21 +8,20 @@ Please create issues if there are any questions! This can make things more tract
 
 ## Data preprocessing
 
-Before training or decoding, there is a required data-preprocessing step, which contains the several tasks introduced below.
-To conduct data preprocessing, simply XXXX (TODO of Xiaochang).
-As a result, a json file named XXXX (TODO of Xiaochang) will be generated.
-In more detail, our data preprocessing conduct the following tasks:
+Before training or decoding, there is a required data preprocessing procedure. This includes a series of more specific data preprocessing steps mentioned in the paper:
 
-(1) Concept Generation
+(1) Running JAMR
+This step relies on running JAMR (https://github.com/jflanigan/jamr) on the AMR data to get the pos tag, dependency information. For example: 
+${JAMR_HOME}/scripts/train_LDC2015E86.sh
 
-Concepts are the vertices of target AMR graphs.
-Given an input sentence (The boy wants to go), we need to recognize the concepts (boy, want-01, go-01) before generating the corresponding AMR graph.
+This will generate the results for tokenization, dependency parsing and NER tagging, extract alignment for the train, eval and test split. We also extract the concept identification results from JAMR:
+${JAMR_HOME}/scripts/TRAIN_STAGE1_ONLY.sh
 
-(2) Anonymization ?? (TODO of Xiaochang, please check whether you apply your EACL work here)
+(2) Categorization (Anonymization)
+We first collect all the JAMR output from the previous step. Then we run the the categorization step to collapse multi-concept categories (named-entity, dates, verbalization et al.). See pipeline.sh for more details (need to change two paths according to the output from the previous step).
 
 (3) Action Sequence Generation
-
-Based on concepts and the corresponding AMR algorithm, our oracle algorithm determins the action sequences.
+Given the input text, target categorized AMR and the alignment between them, we use the oracle algorithm to compute the oracle action sequence. See pipeline.sh for more details.
 
 ## Decoding
 
