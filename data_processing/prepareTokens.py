@@ -351,7 +351,8 @@ def linearize_amr(args):
     tok_file = os.path.join(args.data_dir, 'token')
     lem_file = os.path.join(args.data_dir, 'lemma')
     pos_file = os.path.join(args.data_dir, 'pos')
-    phrase_file = os.path.join(args.data_dir, "phrases")
+    phrase_file = os.path.join(args.phrase_file)
+    skip_sent_file = os.path.join(args.data_dir, "skipped_sentences")
 
     # Map from a frequent phrase to its most frequent concept.
     phrase_map = utils.loadPhrases(phrase_file)
@@ -419,7 +420,8 @@ def linearize_amr(args):
     verbalization_path = os.path.join(args.resource_dir, "verbalization-list-v1.01.txt")
     VERB_LIST = load_verb_list(verbalization_path)
 
-    skipped_train_sentences = set([int(line.strip() for line in open("./skipped_sentences"))])
+    # skipped_train_sentences = set([int(line.strip() for line in open("./skipped_sentences"))])
+    skipped_sentences = set()
 
     amr_indices = 0
 
@@ -432,6 +434,7 @@ def linearize_amr(args):
         # realign_sentence("".join(orig_tok_seq), "".join(tok_seq))
         if not equals("".join(orig_tok_seq), "".join(tok_seq)):
             print "Skip sentence: %d" % sent_idx
+            skipped_sentences.add(sent_idx)
             continue
 
         # print "Sentence", sent_idx
@@ -556,7 +559,10 @@ def linearize_amr(args):
         print >> conll_wf, ''
 
     # logger.writeln("A total of %d sentences with unaligned entities" % unaligned_sents)
-
+    skip_wf = open(skip_sent_file, "w")
+    for skip_sent_idx in skipped_sentences:
+        print  >> skip_wf, skip_sent_idx
+    skip_wf.close()
     conll_wf.close()
     # tok_wf.close()
     # lemma_wf.close()
@@ -1546,6 +1552,7 @@ if __name__ == '__main__':
     argparser.add_argument("--format", type=str, help="alignment format. JAMR or semeval alignments", required=False)
     argparser.add_argument("--input_file", type=str, help="the original sentence file", required=False)
     argparser.add_argument("--token_file", type=str, help="the tokenized sentence file", required=False)
+    argparser.add_argument("--phrase_file", type=str, help="multi-token-phrases to single concept", required=False)
     argparser.add_argument("--resource_dir", type=str, help="the directory for saving resources", required=False)
     argparser.add_argument("--align_file", type=str, help="the original AMR graph files", required=False)
     argparser.add_argument("--output", type=str, help="the output file", required=False)

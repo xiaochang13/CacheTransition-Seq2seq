@@ -455,8 +455,9 @@ def loadDataset(path):
     pos_file = os.path.join(path, "pos")
     dep_file = os.path.join(path, "dep")
     amr_conll_file = os.path.join(path, "amr_conll")
+    skip_sent_file = os.path.join(path, "skipped_sentence")
 
-    skipped_train_sentences = set([int(line.strip()) for line in open("./skipped_sentences")])
+    skipped_oracle_sentences = set([int(line.strip()) for line in open(skip_sent_file)])
 
     tok_seqs = readToks(tok_file)
     lem_seqs = readToks(lemma_file)
@@ -465,10 +466,10 @@ def loadDataset(path):
     dep_trees = loadDependency(dep_file, tok_seqs)
     amr_graphs = loadAMRConll(amr_conll_file)
 
-    tok_seqs = ignore_instances(tok_seqs, skipped_train_sentences)
-    lem_seqs = ignore_instances(lem_seqs, skipped_train_sentences)
-    pos_seqs = ignore_instances(pos_seqs, skipped_train_sentences)
-    dep_trees = ignore_instances(dep_trees, skipped_train_sentences)
+    tok_seqs = ignore_instances(tok_seqs, skipped_oracle_sentences)
+    lem_seqs = ignore_instances(lem_seqs, skipped_oracle_sentences)
+    pos_seqs = ignore_instances(pos_seqs, skipped_oracle_sentences)
+    dep_trees = ignore_instances(dep_trees, skipped_oracle_sentences)
 
     assert len(tok_seqs) == len(amr_graphs)
 

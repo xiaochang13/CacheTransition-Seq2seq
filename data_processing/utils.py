@@ -273,9 +273,9 @@ def loadPhrases(path):
     with open(path) as f:
         for line in f:
             if line.strip():
-                splits = line.strip().split("\t")
-                phrase = splits[0]
-                node_repr = splits[2].split("#")[0].split(":")[0]
+                splits = line.strip().split(" ### ")
+                phrase = splits[0].replace("@", " ")
+                node_repr = splits[1]
                 mle_map[phrase] = node_repr
     return mle_map
 
