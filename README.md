@@ -32,7 +32,7 @@ Simply execute the corresponding decoding script with one argument being the ide
 
 ## Training
 
-First, modify config.json. You should pay attention to the field "suffix", which is an identifier of the model being trained and saved. We usually use the experiment setting, such as "bch20_lr1e3_l21e3", as the identifier. Also point "train_path" and "test_path" to your corresponding files. Note that "test_path" represents the path of a development set, not the final test set.
+First, modify config.json. You should pay attention to the field "suffix", which is an identifier of the model being trained and saved. We usually use the experiment setting, such as "bch20_lr1e3_l21e3", as the identifier. The "model_dir" field specifies the name of the directory where the model is to be saved and should be updated as well. You should also point "train_path" and "test_path" to the oracle output files for the training and development sets. Note that "test_path" represents the path of a development set, not the final test set.
 Finally, execute the corresponding script file, such as "./train.sh".
 
 ## Cite
