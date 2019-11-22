@@ -6,11 +6,11 @@ PREPROCESS_INPUT_DIR=./jamr_data
 for split in training dev test;
 do
     DATA_DIR="${JAMR_OUTPUT_DIR}"
-    AMR_FILE="${DATA_DIR}/${split}.txt"
-    DEP_FILE="${DATA_DIR}/${split}.txt.snt.deps"
-    NER_FILE="${DATA_DIR}/${split}.txt.snt.IllinoisNER"
-    CDEC_TOK="${DATA_DIR}/${split}.txt.snt.tok"
-    ALIGNED="${DATA_DIR}/${split}.txt.aligned"
+    AMR_FILE="${DATA_DIR}/${split}/${split}.txt"
+    DEP_FILE="${DATA_DIR}/${split}/${split}.txt.snt.deps"
+    NER_FILE="${DATA_DIR}/${split}/${split}.txt.snt.IllinoisNER"
+    CDEC_TOK="${DATA_DIR}/${split}/${split}.txt.snt.tok"
+    ALIGNED="${DATA_DIR}/${split}/${split}.txt.aligned"
 
     OUTPUT_DIR="${PREPROCESS_INPUT_DIR}/${split}"
     mkdir -p "${OUTPUT_DIR}"

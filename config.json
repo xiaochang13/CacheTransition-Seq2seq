@@ -1,0 +1,55 @@
+{
+    "train_path": "path/to/oracle/training/examples",
+    "test_path": "path/to/oracle/dev/examples",
+    "word_vec_path": "path/to/vocabulary/embeddings",
+    "suffix": "model-identifier",
+    "model_dir": "path/to/model",
+    "isLower": true,
+
+    "attention_vec_size": 100,
+
+    "beam_size": 10,
+    "topk_size": 155,
+
+    "max_passage_len": 100,
+    "min_answer_len": 0,
+    "max_answer_len": 300,
+    "max_char_per_word": 10,
+    
+    "batch_size": 30,
+    "learning_rate": 0.001,
+    "lambda_l2": 0.001,
+    "dropout_rate": 0.3,
+    "max_epochs": 50,
+    "optimize_type": "adam",
+
+    "context_layer_num": 1,
+    "context_lstm_dim": 100,
+
+    "with_highway": true,
+    "highway_layer_num": 1,
+    "with_match_highway": true,
+    "with_aggregation_highway": true,
+
+    "with_char": false,
+    "with_POS": true,
+    "with_lemma": true,
+    "char_dim": 50,
+    "POS_dim": 20,
+    "lemma_dim": 20,
+    "char_lstm_dim": 50,
+    "feat_num": 57,
+    "feat_dim": 50,
+    "feat_comp_dim": 100,
+    "action_dim": 100,
+    "compress_input": true,
+    "compress_input_dim": 100,
+    "fix_word_vec": true,
+
+    "gen_hidden_size": 100,
+    "num_softmax_samples": 100,
+    "mode": "ce_train",
+
+    "config_path": "config.json",
+    "generate_config": false
+}
